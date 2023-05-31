@@ -1,0 +1,4 @@
+module CEmacsModule [system] {
+    header "../../Headers/Cemacs-module-Bridging-Header.h"
+    export *
+}
