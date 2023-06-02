@@ -23,6 +23,13 @@ let package = Package(
     // Targets can depend on other targets in this package, and on products in packages this package depends on.
     .target(
       name: "MacCalfw",
-      dependencies: ["CEmacsModule"])
+      dependencies: ["CEmacsModule"],
+      resources: [
+        .process("Resources/Info.plist")
+      ]//,
+      // swiftSettings: [
+      //   .define("InfoPlistPath", .string("$(SRCROOT)/Sources/MacCalfw/Info.plist"))
+      // ]
+    )
   ]
 )
