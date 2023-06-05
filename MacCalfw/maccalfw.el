@@ -30,9 +30,6 @@
 ;; To open a calendar buffer, execute the following function.
 ;; (cfw:open-maccal-calendar 'all)
 
-;; Executing the following command, this program clears caches to refresh the ICS data.
-;; (cfw:maccal-data-cache-clear-all)
-
 ;;; Code:
 
 (require 'calfw)
@@ -42,11 +39,14 @@
         (decoded-time-day date)
         (decoded-time-year date)))
 
-(defun maccalfw--encode-date (date)
-  (encode-time (list 0 0 0
-                     (nth 1 date)
+(defun maccalfw--encode-date (date &optional end-of-day)
+  (encode-time (append
+                (if end-of-day
+                    (list 23 59 59)
+                  (list 0 0 0))
+                (list (nth 1 date)
                      (nth 0 date)
-                     (nth 2 date))))
+                      (nth 2 date)))))
 
 (defun maccalfw--decode-time (date)
   (list (decoded-time-hour date)
@@ -83,29 +83,12 @@
           (message "Cannot handle this event, tag: %s" e))
         finally (return `((periods ,periods) ,@contents))))
 
-(defvar maccalfw-data-cache nil "a list of (cal-id . ics-data)")
-
-(defun maccalfw-data-cache-clear (cal-id)
-  (setq maccalfw-data-cache
-        (cl-loop for i in maccalfw-data-cache
-              for (u . d) = i
-              unless (equal u cal-id)
-              collect i)))
-
-(defun maccalfw-data-cache-clear-all ()
-  (interactive)
-  (setq maccalfw-data-cache nil))
-
 (defun maccalfw-to-calendar (cal-id begin end)
   (cl-loop for event in
         (maccalfw-convert-to-calfw
             (maccalfw-fetch-events cal-id
                                    (maccalfw--encode-date begin)
-                                   ;; end is not included, added an extra day
-                                   (time-add
-                                    (maccalfw--encode-date end)
-                                    ;; seconds in a day
-                                    86400)))
+                                   (maccalfw--encode-date end t)))
         if (and (listp event)
                 (equal 'periods (car event)))
         collect
@@ -121,9 +104,14 @@
      :name name
      :color color
      ;; TODO: Better update somehow
-   :update (lambda () (maccalfw-data-cache-clear cal-id))
+   :update #'ignore
      :data (lambda (begin end)
            (maccalfw-to-calendar cal-id begin end))))
+
+(defun cfw:get-calendars-by-name (names)
+  (--filter
+   (member (plist-get it :title) names)
+   (maccalfw-get-calendars)))
 
 (defun cfw:open-maccalfw-calendar (&optional calendars)
   "Simple calendar interface. This command displays all CALENDARS
@@ -132,12 +120,11 @@ obtained using `maccalfw-get-calendars' or all of them if it is 'all."
   (module-load (locate-library (expand-file-name
                                 "~/Work/maccalfw/MacCalfw/.build/debug/libmaccalfw.dylib")
                                t))
-
   (when (eq calendars 'all)
     (setq calendars (maccalfw-get-calendars)))
   (save-excursion
     (let ((cp (cfw:create-calendar-component-buffer
-               :view 'week
+               :view 'block-week
                :contents-sources
                (mapcar
                 (lambda (x)
@@ -147,7 +134,8 @@ obtained using `maccalfw-get-calendars' or all of them if it is 'all."
                 calendars))))
       (switch-to-buffer (cfw:cp-get-buffer cp)))))
 
-;; (progn (eval-current-buffer) (cfw:open-ical-calendar "./ics/test.ics"))
+;; (cfw:open-maccalfw-calendar
+;;  (cfw:get-calendars-by-name '("iCloud Family")))
 
 (provide 'maccalfw)
 ;;; maccalfw.el ends here
