@@ -24,8 +24,10 @@ let package = Package(
     .target(
       name: "MacCalfw",
       dependencies: ["CEmacsModule"],
+      path: "Sources/MacCalfw",
+      sources: ["MacCalfw.swift", "EmacsUtil.swift"],
       resources: [
-        .process("Resources/Info.plist")
+        .process("../../Resources/Info.plist")
       ]//,
       // swiftSettings: [
       //   .define("InfoPlistPath", .string("$(SRCROOT)/Sources/MacCalfw/Info.plist"))
