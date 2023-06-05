@@ -1,6 +1,6 @@
-;;; maccalfw.el --- calendar view for ical format
+;;; maccalfw.el --- calendar view for Mac Calendars -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2011  SAKURAI Masashi
+;;Copyright (C) 2011  SAKURAI Masashi
 
 ;; Author: SAKURAI Masashi <m.sakurai at kiwanami.net>
 ;; Keywords: calendar
@@ -37,23 +37,34 @@
 
 (require 'calfw)
 
+(defun maccalfw--decode-date (date)
+  (list (decoded-time-month date)
+        (decoded-time-day date)
+        (decoded-time-year date)))
+
+(defun maccalfw--encode-date (date)
+  (encode-time (list 0 0 0
+                     (nth 1 date)
+                     (nth 0 date)
+                     (nth 2 date))))
+
+(defun maccalfw--decode-time (date)
+  (list (decoded-time-hour date)
+        (decoded-time-minute date)))
+
+
 (defun maccalfw-convert-event (event)
   (let ((start (decode-time (plist-get event :start)))
         (end (decode-time (plist-get event :end)))
         (all-day-p (plist-get event :all-day-p)))
     (make-cfw:event
-     :start-date  (list (decoded-time-month start)
-                        (decoded-time-day start)
-                        (decoded-time-year start))
+     :start-date  (maccalfw--decode-date start)
      :start-time  (unless all-day-p
-                    (list (decoded-time-hour start)
-                          (decoded-time-minute start)))
-     :end-date    (list (decoded-time-month end)
-                        (decoded-time-day end)
-                        (decoded-time-year end))
+                    (maccalfw--decode-time start))
+     :end-date    (when all-day-p
+                      (maccalfw--decode-date end))
      :end-time    (unless all-day-p
-                    (list (decoded-time-hour end)
-                          (decoded-time-minute end)))
+                    (maccalfw--decode-time end))
      :title       (plist-get event :title)
      :location    (plist-get event :location)
      :description (plist-get event :summary))))
@@ -72,13 +83,13 @@
           (message "Cannot handle this event, tag: %s" e))
         finally (return `((periods ,periods) ,@contents))))
 
-(defvar maccalfw-data-cache nil "a list of (url . ics-data)")
+(defvar maccalfw-data-cache nil "a list of (cal-id . ics-data)")
 
-(defun maccalfw-data-cache-clear (url)
+(defun maccalfw-data-cache-clear (cal-id)
   (setq maccalfw-data-cache
         (cl-loop for i in maccalfw-data-cache
               for (u . d) = i
-              unless (equal u url)
+              unless (equal u cal-id)
               collect i)))
 
 (defun maccalfw-data-cache-clear-all ()
@@ -88,7 +99,13 @@
 (defun maccalfw-to-calendar (cal-id begin end)
   (cl-loop for event in
         (maccalfw-convert-to-calfw
-         (maccalfw-fetch-events cal-id begin end))
+            (maccalfw-fetch-events cal-id
+                                   (maccalfw--encode-date begin)
+                                   ;; end is not included, added an extra day
+                                   (time-add
+                                    (maccalfw--encode-date end)
+                                    ;; seconds in a day
+                                    86400)))
         if (and (listp event)
                 (equal 'periods (car event)))
         collect
@@ -100,35 +117,33 @@
         collect event))
 
 (defun maccalfw-create-source (name cal-id color)
-  (lexical-let ((url url))
     (make-cfw:source
      :name name
      :color color
      ;; TODO: Better update somehow
-     :update (lambda () (maccalfw-data-cache-clear url))
+   :update (lambda () (maccalfw-data-cache-clear cal-id))
      :data (lambda (begin end)
-             (maccalfw-to-calendar cal-id begin end)))))
+           (maccalfw-to-calendar cal-id begin end))))
 
-(defun cfw:open-maccalfw-calendar (calendars)
+(defun cfw:open-maccalfw-calendar (&optional calendars)
   "Simple calendar interface. This command displays all CALENDARS
 obtained using `maccalfw-get-calendars' or all of them if it is 'all."
-  (interactive)
+  (interactive (list 'all))
   (module-load (locate-library (expand-file-name
                                 "~/Work/maccalfw/MacCalfw/.build/debug/libmaccalfw.dylib")
                                t))
 
-  (when (eq cal-ids 'all)
-    (setq cal-ids
-          (maccalfw-get-calendars)))
+  (when (eq calendars 'all)
+    (setq calendars (maccalfw-get-calendars)))
   (save-excursion
     (let ((cp (cfw:create-calendar-component-buffer
-               :view 'month
+               :view 'week
                :contents-sources
                (mapcar
                 (lambda (x)
-                  (maccalfw-create-source (plist-get :title x)
-                                          (plist-get :id x)
-                                          (plist-get :color x)))
+                  (maccalfw-create-source (plist-get x :title)
+                                          (plist-get x :id)
+                                          (plist-get x :color)))
                 calendars))))
       (switch-to-buffer (cfw:cp-get-buffer cp)))))
 

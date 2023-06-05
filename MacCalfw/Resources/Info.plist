@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
         <key>NSCalendarsUsageDescription</key>
-        <string>Your reason for accessing calendars</string>
+        <string>Emacs requires permission to access the calendar for maccalfw.el to work.</string>
 </dict>
 </plist>
