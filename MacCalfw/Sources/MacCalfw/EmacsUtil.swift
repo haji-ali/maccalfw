@@ -33,7 +33,13 @@ extension emacs_value : EmacsCastable{
 
 extension String : EmacsCastable {
     func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
-        return env.pointee.make_string(env, self, self.count)
+        let cString = self.utf8CString
+        return cString.withUnsafeBufferPointer { bufferPointer in
+            // Note: We pass cString.count-1 as the size to exclude the
+            // terminating NULL byte
+            env.pointee.make_string(env, bufferPointer.baseAddress,
+                                    cString.count-1)
+        }
     }
 
     static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,

@@ -33,6 +33,7 @@
 ;;; Code:
 
 (require 'calfw)
+(require 'calfw-blocks)
 
 (defun maccalfw--decode-date (date)
   (list (decoded-time-month date)
@@ -42,7 +43,7 @@
 (defun maccalfw--encode-date (date &optional end-of-day)
   (encode-time (append
                 (if end-of-day
-                    (list 23 59 59)
+                    (list 59 59 23)
                   (list 0 0 0))
                 (list (nth 1 date)
                      (nth 0 date)
@@ -105,6 +106,7 @@
      :color color
      ;; TODO: Better update somehow
    :update #'ignore
+   ;;:hidden nil
      :data (lambda (begin end)
            (maccalfw-to-calendar cal-id begin end))))
 
