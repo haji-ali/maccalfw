@@ -115,7 +115,7 @@
    (member (plist-get it :title) names)
    (maccalfw-get-calendars)))
 
-(defun maccalfw--load-module (force)
+(defun maccalfw--load-module (&optional force)
   (unless (and (not force) (fboundp #'maccalfw-get-calendars))
     (unless module-file-suffix
       (error "maccalfw: Dynamic modules are not supported"))
@@ -130,15 +130,13 @@
                (default-directory (file-name-directory
                                    (feature-file 'maccalfw)))
                (command
-                `(,swift ;; TODO: Better way of including homebrew?
-                         ;; "-I/opt/homebrew/include/"
-                         "-Xcc" "-fmodule-map-file=src/module.modulemap"
+                `(,swift "-Xcc" "-fmodule-map-file=src/module.modulemap"
                          "src/EmacsUtil.swift"
                          "src/MacCalfw.swift"
                          "-O" "-emit-library"
                          "-o" ,mod-name)))
-          (with-current-buffer (get-buffer-create
-                                "*maccalfw module compilation*")
+          (with-current-buffer
+              (get-buffer-create "*maccalfw module compilation*")
             (let ((inhibit-read-only t))
               (erase-buffer)
               (compilation-mode)
