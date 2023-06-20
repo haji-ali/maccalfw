@@ -192,7 +192,9 @@ This command displays any CALENDARS obtained using
     (setq calendars (maccalfw-get-calendars)))
   (save-excursion
     (let ((cp (cfw:create-calendar-component-buffer
-               :view 'block-week
+               :view (if (featurep 'calfw-blocks)
+                         'block-week
+                       'week)
                :contents-sources
                (mapcar
                 (lambda (x)

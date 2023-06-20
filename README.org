@@ -1,0 +1,49 @@
+#+title: maccalfw.el - Calendar view for Mac Calendars
+#+author: Al Haji-Ali
+#+language: en
+#+export_file_name: maccalfw.texi
+#+texinfo_dir_category: Emacs misc features
+#+texinfo_dir_title: maccalfw: (maccalfw).
+#+texinfo_dir_desc: Extensions and application menus based on transient
+
+This package provides a list of commands to be able to fetch, modify and add
+events to Apple's Calendar app.
+
+* Installation
+maccalfw can be installed with the following `use-package` command, assuming
+that you have straight installed.
+#+begin_src emacs-lisp
+  (use-package maccalfw
+    :commands maccalfw-open
+    :straight (:host github
+                     :repo "https://github.com/haji-ali/maccalfw.git"
+                     :files ("maccalfw.el" ("src" . "src"))
+                     :depth full))
+#+end_src
+
+You will need to have the Swift compiler (`swiftc`) which is needed to compile
+the internal module.
+
+Emacs must also have access to your Apple Calendars which means that you will
+need to add the following to Emacs' `Info.plist` (for example inside
+`/Applications/Emacs.app/Contents/Info.plist`) somewhere inside the outer
+`<dict>` tag
+
+#+begin_src xml
+  <key>NSCalendarsUsageDescription</key>
+  <string>Emacs requires permission to access the calendar for maccalfw.el to work.</string>
+#+end_src
+
+and restart Emacs so that when `maccalfw` requests access you will be shown a
+permission dialog that you can approve.
+
+* Configuration
+There's no further configuration needed. You can call `maccalfw-open` to open
+a `week` view of the calendar using `calfw`.
+
+This is how my calendar looks vs my Apple's calendar.
+
+If you want to recreate a similar parity with Apple's calendar then you may
+want to use my forks of [[https://github.com/haji-ali/emacs-calfw][calfw]] and [[https://github.com/haji-ali/calfw-blocks][calfw-blocks]].
+
+The function to create and modify events are still work in progress.
