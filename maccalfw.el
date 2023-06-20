@@ -118,35 +118,37 @@
 (defun maccalfw--load-module (force)
   (unless (and (not force) (fboundp #'maccalfw-get-calendars))
     (unless module-file-suffix
-      (error "Jinx: Dynamic modules are not supported"))
+      (error "maccalfw: Dynamic modules are not supported"))
     (let* ((mod-name (file-name-with-extension
-                      "MacCalfw/.build/release/libmaccalfw/maccalfw"
+                      "maccalfw"
                       module-file-suffix))
            (mod-file (locate-library mod-name t)))
-      (unless (mod-file and (not (eq force 'compile)))
+      (unless (and mod-file (not (eq force 'compile)))
         (let* ((swift (or (getenv "SWIFTC")
                           (executable-find "swiftc")
-                          (error "Jinx: No swift compiler found")))
+                          (error "maccalfw: No swift compiler found")))
                (default-directory (file-name-directory
-                                   (or (locate-library c-name t)
-                                       (error "Jinx: %s not found" c-name))))
+                                   (feature-file 'maccalfw)))
                (command
-                `(,swift "build" "-c" "release" "-Xswiftc"
-                         "-I/opt/homebrew/include/" ;; TODO: Better way of
-                         ;; doing this?
-                         "-o" ,mod-name ,c-name
-                         ,@(split-string-and-unquote
-                            (condition-case nil
-                                (car (process-lines "pkg-config" "--cflags" "--libs" "enchant-2"))
-                              (error "-I/usr/include/enchant-2 -lenchant-2"))))))
-          (with-current-buffer (get-buffer-create "*jinx module compilation*")
+                `(,swift ;; TODO: Better way of including homebrew?
+                         ;; "-I/opt/homebrew/include/"
+                         "-Xcc" "-fmodule-map-file=src/module.modulemap"
+                         "src/EmacsUtil.swift"
+                         "src/MacCalfw.swift"
+                         "-O" "-emit-library"
+                         "-o" ,mod-name)))
+          (with-current-buffer (get-buffer-create
+                                "*maccalfw module compilation*")
             (let ((inhibit-read-only t))
               (erase-buffer)
               (compilation-mode)
               (insert (string-join command " ") "\n")
-              (if (equal 0 (apply #'call-process (car command) nil (current-buffer) t (cdr command)))
-                  (insert (message "Jinx: %s compiled successfully" mod-name))
-                (let ((msg (format "Jinx: Compilation of %s failed" mod-name)))
+              (if (equal 0 (apply #'call-process (car command) nil
+                                  (current-buffer) t (cdr command)))
+                  (insert (message "maccalfw: %s compiled successfully"
+                                   mod-name))
+                (let ((msg (format "maccalfw: Compilation of %s failed"
+                                   mod-name)))
                   (insert msg)
                   (pop-to-buffer (current-buffer))
                   (error msg)))))
@@ -157,9 +159,7 @@
   "Simple calendar interface. This command displays all CALENDARS
 obtained using `maccalfw-get-calendars' or all of them if it is 'all."
   (interactive (list 'all))
-  (module-load (locate-library (expand-file-name
-                                "~/Work/maccalfw/test.dylib")
-                               t))
+  (maccalfw--load-module)
   (when (eq calendars 'all)
     (setq calendars (maccalfw-get-calendars)))
   (save-excursion
