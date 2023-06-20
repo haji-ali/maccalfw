@@ -4,9 +4,8 @@ import CEmacsModule
 import EventKit
 
 
-// TODO: Is it really?
 @_cdecl("plugin_is_GPL_compatible")
-func plugin_is_GPL_compatible() {}
+public func plugin_is_GPL_compatible() {}
 
 extension NSColor {
     var hexString: String? {
@@ -114,8 +113,6 @@ func emacs_cast(_ env: UnsafeMutablePointer<emacs_env>,
     return val?.toEmacsVal(env) ?? Qnil
 }
 
-
-
 func emacs_defun(_ env: UnsafeMutablePointer<emacs_env>,
                          _ name: String,
                          _ min: Int,
@@ -165,13 +162,6 @@ func emacs_list(_ env: UnsafeMutablePointer<emacs_env>,
 
 func emacs_plist(_ env: UnsafeMutablePointer<emacs_env>,
                          _ args: [emacs_value?: EmacsCastable?]) -> emacs_value? {
-    // let arguments = args.enumerated().compactMap { index, element in
-    //     if element == nil || index > 0 && args[index - 1] == nil {
-    //         return nil
-    //     }
-    //     return element!
-    // }
-
     let flatArgs : [EmacsCastable?] =
       Array(args.flatMap
             { key, value in return

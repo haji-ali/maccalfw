@@ -146,7 +146,7 @@ private func maccalfw_fetch_events(
 
 
 @_cdecl("emacs_module_init")
-func emacs_module_init(_ runtime: UnsafeMutablePointer<emacs_runtime>) -> Int32 {
+public func emacs_module_init(_ runtime: UnsafeMutablePointer<emacs_runtime>) -> Int32 {
     // Function implementation
     if MemoryLayout<emacs_runtime>.size > Int(runtime.pointee.size) {
         return 1

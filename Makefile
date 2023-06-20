@@ -1,6 +1,12 @@
-all: exec
 
-exec:
-	cd MacCalfw
-	swift run -Xswiftc -I/opt/homebrew/include/
-	#swiftc example.swift  -I . -L . -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker ./Info.plist
+all: build
+
+build:
+	swiftc -Xcc -fmodule-map-file=src/module.modulemap \
+		-I/opt/homebrew/include/ \
+		src/EmacsUtil.swift \
+		src/MacCalfw.swift \
+		-emit-library -o maccalfw.dylib
+
+test:
+	emacs -Q --batch --load test.el

@@ -101,26 +101,64 @@
         collect event))
 
 (defun maccalfw-create-source (name cal-id color)
-    (make-cfw:source
-     :name name
-     :color color
-     ;; TODO: Better update somehow
+  (make-cfw:source
+   :name name
+   :color color
+   ;; TODO: Better update somehow
    :update #'ignore
    ;;:hidden nil
-     :data (lambda (begin end)
+   :data (lambda (begin end)
            (maccalfw-to-calendar cal-id begin end))))
 
-(defun cfw:get-calendars-by-name (names)
+(defun maccalfw-get-calendars-by-name (names)
   (--filter
    (member (plist-get it :title) names)
    (maccalfw-get-calendars)))
 
-(defun cfw:open-maccalfw-calendar (&optional calendars)
+(defun maccalfw--load-module (force)
+  (unless (and (not force) (fboundp #'maccalfw-get-calendars))
+    (unless module-file-suffix
+      (error "Jinx: Dynamic modules are not supported"))
+    (let* ((mod-name (file-name-with-extension
+                      "MacCalfw/.build/release/libmaccalfw/maccalfw"
+                      module-file-suffix))
+           (mod-file (locate-library mod-name t)))
+      (unless (mod-file and (not (eq force 'compile)))
+        (let* ((swift (or (getenv "SWIFTC")
+                          (executable-find "swiftc")
+                          (error "Jinx: No swift compiler found")))
+               (default-directory (file-name-directory
+                                   (or (locate-library c-name t)
+                                       (error "Jinx: %s not found" c-name))))
+               (command
+                `(,swift "build" "-c" "release" "-Xswiftc"
+                         "-I/opt/homebrew/include/" ;; TODO: Better way of
+                         ;; doing this?
+                         "-o" ,mod-name ,c-name
+                         ,@(split-string-and-unquote
+                            (condition-case nil
+                                (car (process-lines "pkg-config" "--cflags" "--libs" "enchant-2"))
+                              (error "-I/usr/include/enchant-2 -lenchant-2"))))))
+          (with-current-buffer (get-buffer-create "*jinx module compilation*")
+            (let ((inhibit-read-only t))
+              (erase-buffer)
+              (compilation-mode)
+              (insert (string-join command " ") "\n")
+              (if (equal 0 (apply #'call-process (car command) nil (current-buffer) t (cdr command)))
+                  (insert (message "Jinx: %s compiled successfully" mod-name))
+                (let ((msg (format "Jinx: Compilation of %s failed" mod-name)))
+                  (insert msg)
+                  (pop-to-buffer (current-buffer))
+                  (error msg)))))
+          (setq mod-file (expand-file-name mod-name))))
+      (module-load mod-file))))
+
+(defun maccalfw (&optional calendars)
   "Simple calendar interface. This command displays all CALENDARS
 obtained using `maccalfw-get-calendars' or all of them if it is 'all."
   (interactive (list 'all))
   (module-load (locate-library (expand-file-name
-                                "~/Work/maccalfw/MacCalfw/.build/debug/libmaccalfw.dylib")
+                                "~/Work/maccalfw/test.dylib")
                                t))
   (when (eq calendars 'all)
     (setq calendars (maccalfw-get-calendars)))
