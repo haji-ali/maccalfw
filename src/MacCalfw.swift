@@ -12,10 +12,10 @@ typealias EmacsDefunCallback  = (@convention(c)
                                   UnsafeMutablePointer<emacs_value?>?,
                                                        UnsafeMutableRawPointer?) -> emacs_value?)?
 
-func AuthorizeCalendar(_ env: UnsafeMutablePointer<emacs_env>) -> Bool {
+func AuthorizeCalendar(_ env: UnsafeMutablePointer<emacs_env>) throws {
     switch EKEventStore.authorizationStatus(for: .event) {
     case .authorized:
-        return true
+        return
     case .notDetermined:
         let semaphore = DispatchSemaphore(value: 0)
         eventStore.requestAccess(to: .event, completion: {
@@ -24,15 +24,13 @@ func AuthorizeCalendar(_ env: UnsafeMutablePointer<emacs_env>) -> Bool {
         semaphore.wait()
         let status = EKEventStore.authorizationStatus(for: EKEntityType.event)
         if status == EKAuthorizationStatus.authorized {
-            return true
+            return
         }
-        emacs_error(env, "error", "authorization-failed")
-        return false
+        throw EmacsError.error("authorization-failed")
     case .restricted, .denied:
         fallthrough
     @unknown default:
-        emacs_error(env, "error", "not-authorized")
-        return false
+        throw EmacsError.error("not-authorized")
     }
 }
 
@@ -42,9 +40,8 @@ private func maccalfw_get_calendars(_ env: UnsafeMutablePointer<emacs_env>?,
                           _ data: UnsafeMutableRawPointer?) -> emacs_value?
 {
     if let env {
-        if !AuthorizeCalendar(env){
-            return Qnil
-        }
+        do {
+            try AuthorizeCalendar(env)
 
         let calendars = eventStore.calendars(for: .event)
         let Qid = env.pointee.intern(env, ":id")
@@ -65,6 +62,10 @@ private func maccalfw_get_calendars(_ env: UnsafeMutablePointer<emacs_env>?,
                 })
         return list.toEmacsVal(env)
     }
+        catch {
+            emacs_process_error(env, error)
+        }
+    }
     return Qnil
 }
 
@@ -75,15 +76,14 @@ private func maccalfw_fetch_events(
   _ data: UnsafeMutableRawPointer?) -> emacs_value?
 {
     if let env {
+        do {
         if let args, let name = args[0],
-           let calendar_id = String.fromEmacsVal(env, name) {
-        if !AuthorizeCalendar(env){
-            return Qnil
-        }
+               let calendar_id = try String.fromEmacsVal(env, name) {
+                try AuthorizeCalendar(env)
 
             if let calendar = eventStore.calendar(withIdentifier: calendar_id) {
-            let start = Date.fromEmacsVal(env, args[1]!)
-            let end = Date.fromEmacsVal(env, args[2]!)
+                    let start = try Date.fromEmacsVal(env, args[1]!)
+                    let end = try Date.fromEmacsVal(env, args[2]!)
 
             var list = Qnil;
 
@@ -139,11 +139,15 @@ private func maccalfw_fetch_events(
             return list
         }
             else {
-                emacs_error(env, "error", "Cannot retrieve calendar.")
+                throw EmacsError.error("Cannot retrieve calendar.")
             }
         }
         else {
-            emacs_error(env, "wrong-type-argument")
+            throw EmacsError.wrong_type_argument("Wrong type for calendar id")
+        }
+        }
+        catch {
+            emacs_process_error(env, error)
         }
     }
     return Qnil
@@ -155,18 +159,14 @@ private func maccalfw_update_event(
   _ args: UnsafeMutablePointer<emacs_value?>?,
   _ data: UnsafeMutableRawPointer?) -> emacs_value?
 {
-    if let env, let args, let arg0 = args[0] {
-        if !AuthorizeCalendar(env){
-            return Qnil
-        }
+    if let env {
+        do {
+            if let args, let arg0 = args[0] {
+                try AuthorizeCalendar(env)
 
-        let eventData = emacs_parse_plist(env, arg0)
-        print("Parsed list")
-        print("\(eventData["id"] as Optional)")
-        let id = String.fromEmacsVal(env, eventData["id"]!!)
-        print("\(id as Optional)")
+                let eventData = try emacs_parse_plist(env, arg0)
         let eventId =
-          eventData["id"].map { String.fromEmacsVal(env, $0) }
+                  try eventData["id"].map { try String.fromEmacsVal(env, $0) }
         var event : EKEvent
 
         if let eventId, let eventId {
@@ -175,46 +175,45 @@ private func maccalfw_update_event(
                 event = old_event
             }
             else{
-                emacs_error(env, "error", "Cannot retrieve event")
-                return Qnil
+                        throw EmacsError.error("Cannot retrieve event")
             }
         }
         else{
             let calendar_id =
-              eventData["calendar-id"].map { String.fromEmacsVal(env, $0) }
+                      try eventData["calendar-id"].map { try String.fromEmacsVal(env, $0) }
             event = EKEvent(eventStore: eventStore)
-            if let calendar_id, let calendar = eventStore.calendar(withIdentifier: calendar_id!) {
+                    if let calendar_id, let calendar_id,
+                       let calendar = eventStore.calendar(withIdentifier: calendar_id) {
                 event.calendar = calendar
             }
             else {
-                emacs_error(env, "error", "Cannot retrieve calendar")
-                return Qnil
+                        throw EmacsError.error("Cannot retrieve calendar")
             }
         }
 
         if let tmp = eventData["title"] {
-            event.title = String.fromEmacsVal(env, tmp)
+                    event.title = try String.fromEmacsVal(env, tmp)
         }
         if let tmp = eventData["start"] {
-            event.startDate = Date.fromEmacsVal(env, tmp)
+                    event.startDate = try Date.fromEmacsVal(env, tmp)
         }
         if let tmp = eventData["end"] {
-            event.endDate = Date.fromEmacsVal(env, tmp)
+                    event.endDate = try Date.fromEmacsVal(env, tmp)
         }
         if let tmp = eventData["location"] {
-            event.location = String.fromEmacsVal(env, tmp)
+                    event.location = try String.fromEmacsVal(env, tmp)
         }
         if let tmp = eventData["notes"] {
-            event.notes = String.fromEmacsVal(env, tmp)
+                    event.notes = try String.fromEmacsVal(env, tmp)
         }
         if let tmp = eventData["url"] {
-            event.url = URL(string: String.fromEmacsVal(env, tmp) ?? "")
+                    event.url = URL(string: try String.fromEmacsVal(env, tmp) ?? "")
         }
         if let tmp = eventData["all-day-p"] {
             event.isAllDay = env.pointee.is_not_nil(env, tmp)
         }
         if let tmp = eventData["availability"] {
-            event.availability = EKEventAvailability.parse(emacs_symbol_to_string(env, tmp)!)
+                    event.availability = try EKEventAvailability.parse(try emacs_symbol_to_string(env, tmp)!)
         }
 
         // Read-only: occurrenceDate, organizer, last_modified, created_date
@@ -224,7 +223,42 @@ private func maccalfw_update_event(
             try eventStore.save(event, span: .thisEvent)
             return event.eventIdentifier.toEmacsVal(env)
         } catch {
-            emacs_error(env, "error", "Failed to save event with error: \(error.localizedDescription)")
+                    throw EmacsError.error("Failed to save event with error: \(error.localizedDescription)")
+                }
+            }
+        }
+        catch {
+            emacs_process_error(env, error)
+        }
+    }
+    return Qnil
+}
+
+private func maccalfw_remove_event(
+  _ env: UnsafeMutablePointer<emacs_env>?,
+  _ nargs: Int,
+  _ args: UnsafeMutablePointer<emacs_value?>?,
+  _ data: UnsafeMutableRawPointer?) -> emacs_value?
+{
+    if let env, let args {
+        do {
+            try AuthorizeCalendar(env)
+            if let arg0 = args[0], let eventId = try String.fromEmacsVal(env, arg0) {
+                if let event = eventStore.event(withIdentifier: eventId) {
+                    do {
+                        try eventStore.remove(event, span: .thisEvent)
+                        return Qt
+                    } catch {
+                        throw EmacsError.error("Failed to remove event with error: \(error.localizedDescription)")
+                    }
+                }
+                else {
+                    throw EmacsError.error("Cannot retrieve event")
+                }
+            }
+        }
+        catch {
+            emacs_process_error(env, error)
         }
     }
     return Qnil
@@ -236,18 +270,25 @@ private func maccalfw_test(
   _ args: UnsafeMutablePointer<emacs_value?>?,
   _ data: UnsafeMutableRawPointer?) -> emacs_value?
 {
-    if let env, let args, let arg0 = args[0] {
-        let eventData = emacs_parse_plist(env, arg0)
+    if let env {
+        do {
+            if let args, let arg0 = args[0] {
+                let eventData = try emacs_parse_plist(env, arg0)
         for (key, value) in eventData {
             print("\(key as Optional): \(value as Optional)")
         }
 
         if let tmp = eventData[":id"] {
-            let str = String.fromEmacsVal(env, tmp)
+                    let str = try String.fromEmacsVal(env, tmp)
             print("\n\nid: \(str as Optional)")
         }
 
         emacs_error(env, "error", "I hate you")
+    }
+        }
+        catch {
+            emacs_process_error(env, error)
+        }
     }
     return Qnil
 }
@@ -290,6 +331,11 @@ returned.
 
 Note that if the event has a different `:calendar-id`, the event moved to
 the new calendar.
+""")
+
+        emacs_defun(env, "maccalfw-remove-event", 1, 1, maccalfw_remove_event,
+"""
+Remove an event given its ID.
 """)
 
         emacs_defun(env, "maccalfw--test", 1, 1, maccalfw_test,

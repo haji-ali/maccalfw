@@ -45,8 +45,8 @@
   (plist-put event :id nil)
 
   (print event)
-  (setq ret-val (maccalfw-update-event event))
-  (message "Return value: %S" ret-val)
+  ;;(setq ret-val (maccalfw-update-event event))
+  ;;(message "Return value: %S" ret-val)
   )
 
 ;;   (dolist (event events-list)

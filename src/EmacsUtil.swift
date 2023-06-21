@@ -3,9 +3,13 @@ import Foundation
 import CEmacsModule
 import EventKit
 
-
 @_cdecl("plugin_is_GPL_compatible")
 public func plugin_is_GPL_compatible() {}
+
+enum EmacsError : Error {
+    case error(String)
+    case wrong_type_argument(String)
+}
 
 extension NSColor {
     var hexString: String? {
@@ -42,7 +46,7 @@ extension String : EmacsCastable {
     }
 
     static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
-                             _ val : emacs_value?) -> String? {
+                             _ val : emacs_value?) throws -> String? {
         if let val, env.pointee.is_not_nil(env, val) {
             var size: Int = 0
             if !env.pointee.copy_string_contents(env, val, nil, &size) {
@@ -77,7 +81,7 @@ extension Date : EmacsCastable {
     }
 
     static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
-                             _ val : emacs_value?) -> Date? {
+                             _ val : emacs_value?) throws -> Date? {
         // val should be a list of 3 elements having day, month and year.
         if let val, env.pointee.is_not_nil(env, val) {
             let time = env.pointee.extract_time(env, val)
@@ -144,7 +148,7 @@ extension EKEventAvailability : EmacsCastable  {
             return nil
         }
     }
-    static func parse(_ val: String ) -> EKEventAvailability {
+    static func parse(_ val: String )  throws -> EKEventAvailability {
         switch val {
         case "notSupported":
             return .notSupported
@@ -157,7 +161,7 @@ extension EKEventAvailability : EmacsCastable  {
         case "unavailable":
             return .unavailable
         default:
-            return .free // set to default availability
+            throw EmacsError.wrong_type_argument("Unrecognised availability")
         }
     }
 }
@@ -234,27 +238,29 @@ func emacs_parse_list(_ env: UnsafeMutablePointer<emacs_env>,
 }
 
 func emacs_symbol_to_string(_ env: UnsafeMutablePointer<emacs_env>,
-                            _ val: emacs_value?) -> String? {
+                            _ val: emacs_value?) throws -> String? {
     let Qsymbol_name = env.pointee.intern(env, "symbol-name")
-    return String.fromEmacsVal(env,emacs_funcall(env, Qsymbol_name, [val]))
+    return try String.fromEmacsVal(env,emacs_funcall(env, Qsymbol_name, [val]))
 }
 
 func emacs_parse_plist(_ env: UnsafeMutablePointer<emacs_env>,
-                       _ val: emacs_value?) -> [String?: emacs_value?] {
+                       _ val: emacs_value?) throws -> [String?: emacs_value?] {
     let list_data = emacs_parse_list(env, val)
     var result: [String?: emacs_value?] = [:]
 
     for index in stride(from: 0, to: list_data.count, by: 2) {
         if index+1 < list_data.count {
-            if let key = emacs_symbol_to_string(env, list_data[index]),
+            if let key = try emacs_symbol_to_string(env, list_data[index]),
                let value = list_data[index + 1] {
                 result[key.hasPrefix(":") ? String(key.dropFirst()) : key] = value
                 }
             }
+        else{
+            throw EmacsError.wrong_type_argument("plist should have an even number of elements")
+        }
         }
     return result
 }
-
 
 func emacs_error(_ env: UnsafeMutablePointer<emacs_env>,
                  _ symbol: String,
@@ -262,4 +268,20 @@ func emacs_error(_ env: UnsafeMutablePointer<emacs_env>,
     env.pointee.non_local_exit_signal(
       env, env.pointee.intern(env, symbol),
       ([msg] as [EmacsCastable?]).toEmacsVal(env) ?? nil);
+}
+
+
+func emacs_process_error(_ env: UnsafeMutablePointer<emacs_env>,
+                         _ error : Error) {
+    if let e_error = error as? EmacsError {
+        switch e_error {
+        case .wrong_type_argument(let message):
+            emacs_error(env, "wrong-type-argument", message)
+        case .error(let message):
+            emacs_error(env, "error", message)
+        }
+    }
+    else {
+        emacs_error(env, "error", "Unexpected error: \(error.localizedDescription)")
+    }
 }
