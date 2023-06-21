@@ -6,11 +6,11 @@
 #+texinfo_dir_title: maccalfw: (maccalfw).
 #+texinfo_dir_desc: Extensions and application menus based on transient
 
-This package provides a list of commands to be able to fetch, modify and add
-events to Apple's Calendar app.
+This package provides a list of commands to be able to fetch, add, modify and
+remove events to Apple's Calendar app.
 
 * Installation
-maccalfw can be installed with the following `use-package` command, assuming
+=maccalfw= can be installed with the following =use-package= command, assuming
 that you have straight installed.
 #+begin_src emacs-lisp
   (use-package maccalfw
@@ -21,25 +21,25 @@ that you have straight installed.
                      :depth full))
 #+end_src
 
-You will need to have the Swift compiler (`swiftc`) which is needed to compile
+You will need to have the Swift compiler (=swiftc=) which is needed to compile
 the internal module.
 
 Emacs must also have access to your Apple Calendars which means that you will
-need to add the following to Emacs' `Info.plist` (for example inside
-`/Applications/Emacs.app/Contents/Info.plist`) somewhere inside the outer
-`<dict>` tag
+need to add the following to Emacs' =Info.plist= (for example inside
+=/Applications/Emacs.app/Contents/Info.plist=) somewhere inside the outer
+=<dict>= tag
 
 #+begin_src xml
   <key>NSCalendarsUsageDescription</key>
   <string>Emacs requires permission to access the calendar for maccalfw.el to work.</string>
 #+end_src
 
-and restart Emacs so that when `maccalfw` requests access you will be shown a
+and restart Emacs so that when =maccalfw= requests access you will be shown a
 permission dialog that you can approve.
 
 * Configuration
-There's no further configuration needed. You can call `maccalfw-open` to open
-a `week` view of the calendar using `calfw`.
+There's no further configuration needed. You can call =maccalfw-open= to open
+a =week= view of the calendar using =calfw=.
 
 This is how my calendar looks vs my Apple's calendar.
 
