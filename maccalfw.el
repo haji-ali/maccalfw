@@ -174,8 +174,8 @@ accordingly."
 
 (defun maccalfw-get-calendars-by-name (names)
   "Return the calendar IDs with NAMES."
-  (--filter
-   (member (plist-get it :title) names)
+  (cl-remove-if-not
+   (lambda (x) (member (plist-get x :title) names))
    (maccalfw-get-calendars)))
 
 (defun maccalfw-open (&optional calendars)
