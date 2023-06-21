@@ -43,7 +43,8 @@ a `week` view of the calendar using `calfw`.
 
 This is how my calendar looks vs my Apple's calendar.
 
+#+caption: Calendar comparison
+[[file:calendars.png]]
+
 If you want to recreate a similar parity with Apple's calendar then you may
 want to use my forks of [[https://github.com/haji-ali/emacs-calfw][calfw]] and [[https://github.com/haji-ali/calfw-blocks][calfw-blocks]].
-
-The function to create and modify events are still work in progress.
