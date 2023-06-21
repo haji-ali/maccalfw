@@ -161,13 +161,16 @@ private func maccalfw_update_event(
         }
 
         let eventData = emacs_parse_plist(env, arg0)
+        print("Parsed list")
+        print("\(eventData["id"] as Optional)")
+        let id = String.fromEmacsVal(env, eventData["id"]!!)
+        print("\(id as Optional)")
         let eventId =
           eventData["id"].map { String.fromEmacsVal(env, $0) }
-
         var event : EKEvent
 
-        if let eventId {
-            let old_event = eventStore.event(withIdentifier: eventId!)
+        if let eventId, let eventId {
+            let old_event = eventStore.event(withIdentifier: eventId)
             if let old_event {
                 event = old_event
             }
@@ -266,12 +269,12 @@ public func emacs_module_init(_ runtime: UnsafeMutablePointer<emacs_runtime>) ->
 
         emacs_defun(env, "maccalfw-get-calendars", 0, 0, maccalfw_get_calendars,
                     """
-Get a plist of Mac calendars.
+Get a list of Mac calendars.
 Each item in the list contains contains id, title, color and an editable predicated.
 """)
         emacs_defun(env, "maccalfw-fetch-events", 3, 3, maccalfw_fetch_events,
                     """
-Get a plist event in a calendar.
+Get a list of events in a calendar.
 Takes as arguments the CALENDAR-ID, START-TIME and END-TIME.
 The times are encoded times.
 """)
@@ -279,13 +282,14 @@ The times are encoded times.
         emacs_defun(env, "maccalfw-update-event", 1, 1, maccalfw_update_event,
 """
 Update or create an event.
-Takes as an argument a plist of the event.
-Only the keys in the plist are updated. If the plist contains an `:id`
-then the corresponding event is updated. Otherwise, the plist must containg
-`:calendar-id` entry and an event is created and its ID is returned.
+Takes as an argument a plist of the EVENT.
+Only the key-value pairs in the plist are updated. If the plist contains a
+non-nil `:id` then the corresponding event is updated. Otherwise, the plist
+must contain `:calendar-id` entry and an event is created and its ID is
+returned.
 
-Note that if the event has a different `:calendar-id` than is provided, the
-event moved to the new calendar.
+Note that if the event has a different `:calendar-id`, the event moved to
+the new calendar.
 """)
 
         emacs_defun(env, "maccalfw--test", 1, 1, maccalfw_test,

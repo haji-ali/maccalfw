@@ -242,15 +242,17 @@ func emacs_symbol_to_string(_ env: UnsafeMutablePointer<emacs_env>,
 func emacs_parse_plist(_ env: UnsafeMutablePointer<emacs_env>,
                        _ val: emacs_value?) -> [String?: emacs_value?] {
     let list_data = emacs_parse_list(env, val)
-    let keys = stride(from: 0, to: list_data.count, by: 2)
-    let values = stride(from: 1, to: list_data.count, by: 2)
-    let zipped = zip(keys, values)
-    let plist_data =
-      Dictionary<String?, emacs_value?> (uniqueKeysWithValues:
-       zipped.map { (i, j) in
-           (// TODO: Remove colon
-             emacs_symbol_to_string(env, list_data[i]), list_data[j])})
-    return plist_data
+    var result: [String?: emacs_value?] = [:]
+
+    for index in stride(from: 0, to: list_data.count, by: 2) {
+        if index+1 < list_data.count {
+            if let key = emacs_symbol_to_string(env, list_data[index]),
+               let value = list_data[index + 1] {
+                result[key.hasPrefix(":") ? String(key.dropFirst()) : key] = value
+                }
+            }
+        }
+    return result
 }
 
 
