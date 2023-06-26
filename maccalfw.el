@@ -124,7 +124,8 @@ The event is returned `maccalfw-fetch-events'."
                     (maccalfw--decode-time end))
      :title       (plist-get event :title)
      :location    (plist-get event :location)
-     :description (plist-get event :summary))))
+     :description (plist-get event :summary)
+     :data        event)))
 
 (defun maccalfw--convert-to-calfw (events-list)
   "Convert an EVENTS-LIST to calfw events."

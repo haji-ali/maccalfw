@@ -71,7 +71,6 @@ extension String : EmacsCastable {
 
 extension Date : EmacsCastable {
     func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
-        // val should be a list of 3 elements having day, month and year.
         let timeInterval = self.timeIntervalSince1970
         let seconds = Int(timeInterval)
         let nanoseconds = Int((timeInterval - Double(seconds)) * 1_000_000_000)

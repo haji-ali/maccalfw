@@ -48,7 +48,6 @@ private func maccalfw_get_calendars(_ env: UnsafeMutablePointer<emacs_env>?,
         let Qtitle = env.pointee.intern(env, ":title")
         let Qcolor = env.pointee.intern(env, ":color")
         let Qeditable = env.pointee.intern(env, ":editable")
-
         let list : [EmacsCastable?] =
           Array(calendars.map
                 {
@@ -85,8 +84,6 @@ private func maccalfw_fetch_events(
                     let start = try Date.fromEmacsVal(env, args[1]!)
                     let end = try Date.fromEmacsVal(env, args[2]!)
 
-            var list = Qnil;
-
             let calendarEventsPredicate =
               eventStore.predicateForEvents(withStart: start!,
                                             end: end!,
@@ -111,32 +108,32 @@ private func maccalfw_fetch_events(
             let Qcreated_date = env.pointee.intern(env, ":created-date")
             let Qurl = env.pointee.intern(env, ":url")
                 let Qcalendar = env.pointee.intern(env, ":calendar-id")
+                    let Qtimezone = env.pointee.intern(env, ":timezone")
 
-            for event in events {
+                    let list : [EmacsCastable?] =
+                      Array(events.map
+                            {
                 let event_data : [emacs_value? : EmacsCastable?] =
-                  [Qid : event.eventIdentifier,
+                                  [Qid : $0.eventIdentifier,
                        Qcalendar : calendar_id,
-                   Qtitle :event.title,
-                   Qlocation : event.location,
-                   Qnotes : event.hasNotes ? event.notes : nil,
-                   Qstart : event.startDate,
-                   Qend : event.endDate,
-                   Qdate : event.occurrenceDate,
-                   QisDetached : event.isDetached ? Qt : nil,
-                   QisAllDay : event.isAllDay ? Qt : nil,
-                   Qcreated_date : event.creationDate,
-                   Qlast_modified : event.lastModifiedDate,
-                   Qstatus : event.status.toEmacsVal(env),
-                   Qavailability : event.availability.toEmacsVal(env),
-                   Qorganizer : event.organizer?.name,
-                   Qurl : event.url?.absoluteString]
-
-                list = emacs_cons(env,
-                                              event_data.filter{
-                                      $0.value != nil }.toEmacsVal(env),
-                                  list)
-            }
-            return list
+                                   Qtitle :$0.title,
+                                   Qlocation : $0.location,
+                                   Qnotes : $0.hasNotes ? $0.notes : nil,
+                                   Qstart : $0.startDate,
+                                   Qend : $0.endDate,
+                                   Qdate : $0.occurrenceDate,
+                                   QisDetached : $0.isDetached ? Qt : nil,
+                                   QisAllDay : $0.isAllDay ? Qt : nil,
+                                   Qcreated_date : $0.creationDate,
+                                   Qlast_modified : $0.lastModifiedDate,
+                                   Qtimezone : $0.timeZone?.identifier,
+                                   Qstatus : $0.status.toEmacsVal(env),
+                                   Qavailability : $0.availability.toEmacsVal(env),
+                                   Qorganizer : $0.organizer?.name,
+                                   Qurl : $0.url?.absoluteString]
+                                return event_data.filter{$0.value != nil }.toEmacsVal(env)
+                            })
+            return list.toEmacsVal(env)
         }
             else {
                 throw EmacsError.error("Cannot retrieve calendar.")
