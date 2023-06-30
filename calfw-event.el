@@ -43,30 +43,15 @@
     (:url "URL" ,#'identity)
     (:time-zone "timezone" ,#'identity)))
 
-(define-minor-mode calfw-event-mode
-  "Minor mode for special key bindings in a calfw-event buffer.
+(define-derived-mode calfw-event-mode fundamental-mode "Calendar Event"
+  "Major mode for editing calendar events."
+  :lighter " Calfw"
 
-Turning on this mode runs the normal hook `calfw-event-mode-hook'."
-  :lighter " Calfw")
+  (define-key calfw-event-mode-map "\C-c\C-e" #'calfw-event-edit)
+  (define-key calfw-event-mode-map "\C-c\C-k" #'calfw-event-kill)
+  (define-key calfw-event-mode-map "\C-c\C-w" #'calfw-event-save))
 
 (defvar-local calfw-event--data nil)
-
-(defvar calfw-event-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map "\C-c\C-e" #'calfw-event-edit)
-    (define-key map "\C-c\C-k" #'calfw-event-kill)
-    (define-key map "\C-c\C-w" #'calfw-event-save)
-    map)
-  "Keymap for `calfw-event-mode', a minor mode.
-Use this map to set additional keybindings for when Org mode is used
-for a capture buffer.")
-
-(define-minor-mode calfw-event-view-mode
-  "Minor mode for special key bindings in a calfw-event buffer when viewing."
-  :keymap
-  (let ((map (make-sparse-keymap)))
-    (define-key map "q" #'calfw-event-kill)
-    map))
 
 (defun calfw-event-kill ()
   (interactive)
@@ -74,8 +59,6 @@ for a capture buffer.")
 
 (defun calfw-event-edit ()
   (interactive)
-  (read-only-mode -1)
-  (calfw-event-view-mode -1)
 
   (setq-local
    header-line-format
@@ -111,8 +94,14 @@ abort `\\[calfw-event-kill]'.")))
 
 (defun calfw-event-open (source event)
   (pop-to-buffer (generate-new-buffer "*calender event*"))
-
-  (insert " \n")
+  (calfw-event-mode)
+  (widget-insert "\n\n")
+  (widget-create 'editable-field
+                 :size 13
+                 :value-face 'info-title-1
+                 :format " %v " ; Text after the field!
+                 (plist-get event :title))
+  (insert "\n ")
   (let ((options (mapcar
                   (lambda (x)
                     `(item :tag ,(plist-get x :title)
@@ -123,13 +112,6 @@ abort `\\[calfw-event-kill]'.")))
      :tag "Calendar"
      :value (plist-get event :calendar-id)
      options))
-
-  (widget-insert "\n\n")
-  (widget-create 'editable-field
-                 :size 13
-                 ;; TODO: Make face bigger
-                 :format " %v " ; Text after the field!
-                 (plist-get event :title))
   (widget-insert " \n\n")
 
   (widget-create 'editable-field
@@ -165,7 +147,6 @@ abort `\\[calfw-event-kill]'.")))
                          (lambda (x)
                            (calfw-event--show-hide-widget x checked))
                          (cdr toggle))))))
-    (widget-insert " All day")
     (funcall fn-action
              (widget-create 'checkbox
                             :toggle-widgets (cons all-day-wid interval-wid)
@@ -174,12 +155,25 @@ abort `\\[calfw-event-kill]'.")))
                             ;; :notify
                             ;; TODO: Need to remove time
                             ))
-    )
+    (widget-insert " All day"))
 
-  (widget-insert "\n\n")
+  (widget-insert "\n\n ")
+
+
 
   (when-let (timezone (plist-get event :timezone))
-    (widget-insert " Timezone: " timezone)
+    (let ((options (mapcar
+                    (lambda (x)
+                      `(item :tag ,(format "%s (%s)"
+                                           (plist-get x :id)
+                                           (plist-get x :abbrev))
+                             :value ,(plist-get x :id)))
+                    (maccalfw-timezones))))
+      (apply
+       'widget-create 'menu-choice
+       :tag "Timezone"
+       :value timezone
+       options))
     (widget-insert "\n\n"))
 
 
@@ -210,16 +204,20 @@ abort `\\[calfw-event-kill]'.")))
   (widget-create 'editable-field
                  :format " URL: %v"
                  (or (plist-get event :url) ""))
-
-
   (widget-create 'text
                  :format "\n\n%v" ; Text after the field!
                  :value-face 'calfw-event-notes-field
                  (or (plist-get event :notes) ""))
   (use-local-map widget-keymap)
   (widget-setup)
-  (goto-char (point-min)))
-
+  (goto-char (point-min))
+  (setq-local
+   header-line-format
+   (substitute-command-keys
+    "\\<calfw-event-mode-map>Event details. \
+Edit `\\[calfw-event-edit]', \
+abort `\\[calfw-event-kill]'."))
+  (set-buffer-modified-p nil))
 
 (defun calfw-event-goto-details ()
   (interactive)
@@ -229,23 +227,19 @@ abort `\\[calfw-event-kill]'.")))
        event)
     (error "No event at location")))
 
-;; ;; Testing
-;; (let* ((calendars (maccalfw-get-calendars-by-name '("Calendar")))
-;;        (start     (encode-time (list 0 0 0 20 6 2023)))
-;;        (end       (encode-time (list 0 0 10 20 6 2023)))
-;;        (cal-work-id (plist-get (car calendars) :id))
-;;        events-list event)
-
-;;   (setq events-list (maccalfw-fetch-events
-;;                      cal-work-id
-;;                      start end))
-;;   ;; (setq event (car events-list))
-;;   (calfw-event-open (car events-list))
-;;   )
-
+(defun calfw-event-mouse-down (start-event)
+  "Call `mouse-drag-region' but disable double clicking."
+  (interactive "e")
+  (let (mouse-selection-click-count)
+    (if (and (consp start-event)
+             (nthcdr 2 start-event))
+        (setcar (nthcdr 2 start-event) 1))
+    (mouse-drag-region start-event)))
 
 (let ((keymap (make-sparse-keymap)))
   (define-key keymap [13] #'calfw-event-goto-details)
+  (define-key keymap [double-mouse-1] #'calfw-event-goto-details)
+  (define-key keymap [down-mouse-1] #'calfw-event-mouse-down)
   (setq calfw-blocks-event-keymap keymap))
 
 (provide 'calfw-event)

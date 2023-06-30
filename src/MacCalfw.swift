@@ -261,6 +261,36 @@ private func maccalfw_remove_event(
     return Qnil
 }
 
+
+private func maccalfw_timezones(
+  _ env: UnsafeMutablePointer<emacs_env>?,
+  _ nargs: Int,
+  _ args: UnsafeMutablePointer<emacs_value?>?,
+  _ data: UnsafeMutableRawPointer?) -> emacs_value?
+{
+    if let env {
+        let Qid = env.pointee.intern(env, ":id")
+        let Qname = env.pointee.intern(env, ":name")
+        let Qabbrev = env.pointee.intern(env, ":abbrev")
+        let Qoffset = env.pointee.intern(env, ":offset")
+        return TimeZone.knownTimeZoneIdentifiers.map(
+          {
+              if let timezone = TimeZone(identifier: $0) {
+                  let timezone_data : [emacs_value? : EmacsCastable?] =
+                    [Qid : $0,
+                     Qname : timezone.localizedName(for: .standard,
+                                                    locale: Locale.current) ?? "",
+                     Qabbrev : timezone.abbreviation() ?? "",
+                     Qoffset : timezone.secondsFromGMT(for: Date())]
+                  return timezone_data.toEmacsVal(env)
+              }
+              return nil
+          }
+        ).toEmacsVal(env)
+    }
+    return Qnil
+}
+
 private func maccalfw_test(
   _ env: UnsafeMutablePointer<emacs_env>?,
   _ nargs: Int,
@@ -333,6 +363,11 @@ the new calendar.
         emacs_defun(env, "maccalfw-remove-event", 1, 1, maccalfw_remove_event,
 """
 Remove an event given its ID.
+""")
+
+        emacs_defun(env, "maccalfw-timezones", 0, 0, maccalfw_timezones,
+"""
+Returns a list of system timezones.
 """)
 
         emacs_defun(env, "maccalfw--test", 1, 1, maccalfw_test,

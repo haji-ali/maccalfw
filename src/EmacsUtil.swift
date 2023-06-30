@@ -34,6 +34,11 @@ extension emacs_value : EmacsCastable {
     }
 }
 
+extension Int  : EmacsCastable {
+    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+        return env.pointee.make_integer(env, self)
+    }
+}
 extension String : EmacsCastable {
     func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
         let cString = self.utf8CString
