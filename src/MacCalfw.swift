@@ -101,37 +101,37 @@ private func maccalfw_fetch_events(
             let QisDetached = env.pointee.intern(env, ":detached-p")
             let Qdate = env.pointee.intern(env, ":occurrence-date")
             let Qstatus = env.pointee.intern(env, ":status")
-                let Qavailability = env.pointee.intern(env, ":availability")
-            let Qorganizer = env.pointee.intern(env, ":organzier")
+            let Qavailability = env.pointee.intern(env, ":availability")
+            let Qorganizer = env.pointee.intern(env, ":organizer")
             let Qid = env.pointee.intern(env, ":id")
             let Qlast_modified = env.pointee.intern(env, ":last-modified")
             let Qcreated_date = env.pointee.intern(env, ":created-date")
             let Qurl = env.pointee.intern(env, ":url")
-                let Qcalendar = env.pointee.intern(env, ":calendar-id")
-                    let Qtimezone = env.pointee.intern(env, ":timezone")
+            let Qcalendar = env.pointee.intern(env, ":calendar-id")
+            let Qtimezone = env.pointee.intern(env, ":timezone")
 
-                    let list : [EmacsCastable?] =
-                      Array(events.map
-                            {
-                let event_data : [emacs_value? : EmacsCastable?] =
-                                  [Qid : $0.eventIdentifier,
-                       Qcalendar : calendar_id,
-                                   Qtitle :$0.title,
-                                   Qlocation : $0.location,
-                                   Qnotes : $0.hasNotes ? $0.notes : nil,
-                                   Qstart : $0.startDate,
-                                   Qend : $0.endDate,
-                                   Qdate : $0.occurrenceDate,
-                                   QisDetached : $0.isDetached ? Qt : nil,
-                                   QisAllDay : $0.isAllDay ? Qt : nil,
-                                   Qcreated_date : $0.creationDate,
-                                   Qlast_modified : $0.lastModifiedDate,
-                                   Qtimezone : $0.timeZone?.identifier,
-                                   Qstatus : $0.status.toEmacsVal(env),
-                                   Qavailability : $0.availability.toEmacsVal(env),
-                                   Qorganizer : $0.organizer?.name,
-                                   Qurl : $0.url?.absoluteString]
-                                return event_data.filter{$0.value != nil }.toEmacsVal(env)
+            let list : [EmacsCastable?] =
+              Array(events.map
+                    {
+                        let event_data : [emacs_value? : EmacsCastable?] =
+                          [Qid : $0.eventIdentifier,
+                           Qcalendar : calendar_id,
+                           Qtitle :$0.title,
+                           Qlocation : $0.location,
+                           Qnotes : $0.hasNotes ? $0.notes : nil,
+                           Qstart : $0.startDate,
+                           Qend : $0.endDate,
+                           Qdate : $0.occurrenceDate,
+                           QisDetached : $0.isDetached ? Qt : nil,
+                           QisAllDay : $0.isAllDay ? Qt : nil,
+                           Qcreated_date : $0.creationDate,
+                           Qlast_modified : $0.lastModifiedDate,
+                           Qtimezone : $0.timeZone?.identifier,
+                           Qstatus : $0.status.toEmacsVal(env),
+                           Qavailability : $0.availability.toEmacsVal(env),
+                           Qorganizer : $0.organizer?.name,
+                           Qurl : $0.url?.absoluteString]
+                        return event_data.filter{$0.value != nil }.toEmacsVal(env)
                             })
             return list.toEmacsVal(env)
         }
@@ -172,40 +172,44 @@ private func maccalfw_update_event(
                 event = old_event
             }
             else{
-                        throw EmacsError.error("Cannot retrieve event")
+                throw EmacsError.error("Cannot retrieve event")
             }
         }
         else{
             let calendar_id =
-                      try eventData["calendar-id"].map { try String.fromEmacsVal(env, $0) }
+              try eventData["calendar-id"].map { try String.fromEmacsVal(env, $0) }
             event = EKEvent(eventStore: eventStore)
-                    if let calendar_id, let calendar_id,
-                       let calendar = eventStore.calendar(withIdentifier: calendar_id) {
+            if let calendar_id, let calendar_id,
+               let calendar = eventStore.calendar(withIdentifier: calendar_id) {
                 event.calendar = calendar
             }
             else {
-                        throw EmacsError.error("Cannot retrieve calendar")
+                throw EmacsError.error("Cannot retrieve calendar")
             }
         }
 
         if let tmp = eventData["title"] {
-                    event.title = try String.fromEmacsVal(env, tmp)
+            event.title = try String.fromEmacsVal(env, tmp)
         }
         if let tmp = eventData["start"] {
-                    event.startDate = try Date.fromEmacsVal(env, tmp)
+            event.startDate = try Date.fromEmacsVal(env, tmp)
         }
         if let tmp = eventData["end"] {
-                    event.endDate = try Date.fromEmacsVal(env, tmp)
+            event.endDate = try Date.fromEmacsVal(env, tmp)
         }
         if let tmp = eventData["location"] {
-                    event.location = try String.fromEmacsVal(env, tmp)
+            event.location = try String.fromEmacsVal(env, tmp)
         }
         if let tmp = eventData["notes"] {
-                    event.notes = try String.fromEmacsVal(env, tmp)
+            event.notes = try String.fromEmacsVal(env, tmp)
         }
         if let tmp = eventData["url"] {
-                    event.url = URL(string: try String.fromEmacsVal(env, tmp) ?? "")
+            event.url = URL(string: try String.fromEmacsVal(env, tmp) ?? "")
         }
+        if let tmp = eventData["timezone"] {
+            event.timeZone = TimeZone(identifier: try String.fromEmacsVal(env, tmp) ?? "")
+        }
+
         if let tmp = eventData["all-day-p"] {
             event.isAllDay = env.pointee.is_not_nil(env, tmp)
         }
@@ -269,24 +273,28 @@ private func maccalfw_timezones(
   _ data: UnsafeMutableRawPointer?) -> emacs_value?
 {
     if let env {
-        let Qid = env.pointee.intern(env, ":id")
         let Qname = env.pointee.intern(env, ":name")
         let Qabbrev = env.pointee.intern(env, ":abbrev")
         let Qoffset = env.pointee.intern(env, ":offset")
-        return TimeZone.knownTimeZoneIdentifiers.map(
-          {
-              if let timezone = TimeZone(identifier: $0) {
-                  let timezone_data : [emacs_value? : EmacsCastable?] =
-                    [Qid : $0,
-                     Qname : timezone.localizedName(for: .standard,
-                                                    locale: Locale.current) ?? "",
-                     Qabbrev : timezone.abbreviation() ?? "",
-                     Qoffset : timezone.secondsFromGMT(for: Date())]
-                  return timezone_data.toEmacsVal(env)
-              }
-              return nil
-          }
-        ).toEmacsVal(env)
+        let Qdefault = env.pointee.intern(env, ":default")
+        let defTimeZone = NSTimeZone.default
+        return TimeZone.knownTimeZoneIdentifiers.map {
+            let timezone = (defTimeZone.identifier == $0 ?
+                              defTimeZone :
+                              TimeZone(identifier: $0))
+            if let timezone {
+                var timezone_data : [emacs_value? : EmacsCastable?] =
+                  [Qname : timezone.localizedName(for: .standard,
+                                                  locale: Locale.current) ?? "",
+                   Qabbrev : timezone.abbreviation() ?? "",
+                   Qoffset : timezone.secondsFromGMT(for: Date())]
+                if defTimeZone.identifier == $0 {
+                    timezone_data[Qdefault] = Qt
+                }
+                return emacs_cons(env, $0.toEmacsVal(env), timezone_data.toEmacsVal(env))
+            }
+            return emacs_cons(env, $0.toEmacsVal(env), Qnil)
+        }.toEmacsVal(env)
     }
     return Qnil
 }

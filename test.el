@@ -1,9 +1,13 @@
 (require 'time-date)
 
 (module-load (locate-library (expand-file-name "./libmaccalfw.dylib") t))
-(module-load (locate-library (file-name-with-extension "libmaccalfw"
-                                                       module-file-suffix)
-                             t))
+;; (module-load (locate-library (file-name-with-extension "libmaccalfw"
+;;                                                        module-file-suffix)
+;;                              t))
+
+(message "%S" (cl-find-if
+               (lambda (x) (plist-get x :default))
+               (maccalfw-timezones)))
 
 ;; (condition-case err
 ;;     (maccalfw--test '(:hello "World" :test "testing" :id "MyID" :wrong))
@@ -35,22 +39,22 @@
 ;;   (message "Return value: %S" (length events-list ))
 ;;   (message "Return value: %S" ret-val))
 
-(defun maccalfw-get-calendars-by-name (names)
-  "Return the calendar IDs with NAMES."
-  (cl-remove-if-not
-   (lambda (x) (member (plist-get x :title) names))
-   (maccalfw-get-calendars)))
+;; (defun maccalfw-get-calendars-by-name (names)
+;;   "Return the calendar IDs with NAMES."
+;;   (cl-remove-if-not
+;;    (lambda (x) (member (plist-get x :title) names))
+;;    (maccalfw-get-calendars)))
 
-(let* ((calendars (maccalfw-get-calendars-by-name '("Calendar")))
-       (start     (encode-time (list 0 0 0 20 6 2023)))
-       (end       (encode-time (list 0 0 10 20 6 2023)))
-       (cal-work-id (plist-get (car calendars) :id))
-       events-list event)
+;; (let* ((calendars (maccalfw-get-calendars-by-name '("Calendar")))
+;;        (start     (encode-time (list 0 0 0 20 6 2023)))
+;;        (end       (encode-time (list 0 0 10 20 6 2023)))
+;;        (cal-work-id (plist-get (car calendars) :id))
+;;        events-list event)
 
-  (setq events-list (maccalfw-fetch-events
-                     cal-work-id
-                     start end))
-  ;; (setq event (car events-list))
-  (message "%S" (plist-get (car events-list) :time-zone))
-  )
-(maccalfw--load-module 'compile)
+;;   (setq events-list (maccalfw-fetch-events
+;;                      cal-work-id
+;;                      start end))
+;;   ;; (setq event (car events-list))
+;;   (message "%S" (plist-get (car events-list) :time-zone))
+;;   )
+;; (maccalfw--load-module 'compile)

@@ -124,6 +124,13 @@ extension Array : EmacsCastable where Element == EmacsCastable?  {
     }
 }
 
+// extension Tuple  : EmacsCastable where
+//   T1 == EmacsCastable? and T2 == EmacsCastable? {
+//     func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+//         return emacs_cons()
+//     }
+// }
+
 extension Dictionary : EmacsCastable where Key == emacs_value?, Value == EmacsCastable?  {
     func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
         let flatArgs : [EmacsCastable?] =

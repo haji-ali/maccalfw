@@ -187,19 +187,18 @@ This command displays any CALENDARS obtained using
   (maccalfw--load-module)
   (when (eq calendars 'all)
     (setq calendars (maccalfw-get-calendars)))
-  (save-excursion
-    (let ((cp (cfw:create-calendar-component-buffer
-               :view (if (featurep 'calfw-blocks)
-                         'block-week
-                       'week)
-               :contents-sources
-               (mapcar
-                (lambda (x)
-                  (maccalfw--create-source (plist-get x :title)
-                                          (plist-get x :id)
-                                          (plist-get x :color)))
-                calendars))))
-      (switch-to-buffer (cfw:cp-get-buffer cp)))))
+  (cfw:open-calendar-buffer
+   :view (if (featurep 'calfw-blocks)
+             'block-week
+           'week)
+   :contents-sources
+   (mapcar
+    (lambda (x)
+      (maccalfw--create-source (plist-get x :title)
+                               (plist-get x :id)
+                               (plist-get x :color)))
+    calendars)
+   :sorter #'calfw-blocks-default-sorter))
 
 (provide 'maccalfw)
 ;;; maccalfw.el ends here
