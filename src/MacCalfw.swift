@@ -68,6 +68,37 @@ private func maccalfw_get_calendars(_ env: UnsafeMutablePointer<emacs_env>?,
     return Qnil
 }
 
+private func maccalfw_event_to_plist(_ env: UnsafeMutablePointer<emacs_env>,
+                                     _ event_data : EKEvent,
+                                     _ calendar_id : String?) -> emacs_value?
+{
+    let event_plist : [String : EmacsCastable?] =
+      [":id" : event_data.eventIdentifier,
+       ":calendar-id" : calendar_id,
+       ":title" :event_data.title,
+       ":location" : event_data.location,
+       ":notes" : event_data.hasNotes ? event_data.notes : nil,
+       ":start" : event_data.startDate,
+       ":end" : event_data.endDate,
+       ":occurrence-date" : event_data.occurrenceDate,
+       ":detached-p" : event_data.isDetached ? Qt : nil,
+       ":all-day-p" : event_data.isAllDay ? Qt : nil,
+       ":created-date" : event_data.creationDate,
+       ":last-modified" : event_data.lastModifiedDate,
+       ":timezone" : event_data.timeZone?.identifier,
+       ":status" : event_data.status.toEmacsVal(env),
+       ":availability" : event_data.availability.toEmacsVal(env),
+       ":organizer" : event_data.organizer?.name,
+       ":url" : event_data.url?.absoluteString]
+
+    let quoted_plist =
+      Dictionary(uniqueKeysWithValues:
+                   event_plist.map {
+                       (env.pointee.intern(env, $0.key), $0.value) })
+
+    return quoted_plist.filter{$0.value != nil }.toEmacsVal(env)
+}
+
 private func maccalfw_fetch_events(
   _ env: UnsafeMutablePointer<emacs_env>?,
   _ nargs: Int,
@@ -90,49 +121,8 @@ private func maccalfw_fetch_events(
                                             calendars: [calendar])
 
             let events = eventStore.events(matching: calendarEventsPredicate)
-
-            let Qtitle = env.pointee.intern(env, ":title")
-            let Qstart = env.pointee.intern(env, ":start")
-            let Qend = env.pointee.intern(env, ":end")
-            let Qlocation = env.pointee.intern(env, ":location")
-            let Qnotes = env.pointee.intern(env, ":notes")
-
-            let QisAllDay = env.pointee.intern(env, ":all-day-p")
-            let QisDetached = env.pointee.intern(env, ":detached-p")
-            let Qdate = env.pointee.intern(env, ":occurrence-date")
-            let Qstatus = env.pointee.intern(env, ":status")
-            let Qavailability = env.pointee.intern(env, ":availability")
-            let Qorganizer = env.pointee.intern(env, ":organizer")
-            let Qid = env.pointee.intern(env, ":id")
-            let Qlast_modified = env.pointee.intern(env, ":last-modified")
-            let Qcreated_date = env.pointee.intern(env, ":created-date")
-            let Qurl = env.pointee.intern(env, ":url")
-            let Qcalendar = env.pointee.intern(env, ":calendar-id")
-            let Qtimezone = env.pointee.intern(env, ":timezone")
-
             let list : [EmacsCastable?] =
-              Array(events.map
-                    {
-                        let event_data : [emacs_value? : EmacsCastable?] =
-                          [Qid : $0.eventIdentifier,
-                           Qcalendar : calendar_id,
-                           Qtitle :$0.title,
-                           Qlocation : $0.location,
-                           Qnotes : $0.hasNotes ? $0.notes : nil,
-                           Qstart : $0.startDate,
-                           Qend : $0.endDate,
-                           Qdate : $0.occurrenceDate,
-                           QisDetached : $0.isDetached ? Qt : nil,
-                           QisAllDay : $0.isAllDay ? Qt : nil,
-                           Qcreated_date : $0.creationDate,
-                           Qlast_modified : $0.lastModifiedDate,
-                           Qtimezone : $0.timeZone?.identifier,
-                           Qstatus : $0.status.toEmacsVal(env),
-                           Qavailability : $0.availability.toEmacsVal(env),
-                           Qorganizer : $0.organizer?.name,
-                           Qurl : $0.url?.absoluteString]
-                        return event_data.filter{$0.value != nil }.toEmacsVal(env)
-                            })
+              Array(events.map {return maccalfw_event_to_plist(env, $0, calendar_id)})
             return list.toEmacsVal(env)
         }
             else {
@@ -142,6 +132,34 @@ private func maccalfw_fetch_events(
         else {
             throw EmacsError.wrong_type_argument("Wrong type for calendar id")
         }
+        }
+        catch {
+            emacs_process_error(env, error)
+        }
+    }
+    return Qnil
+}
+
+private func maccalfw_get_event(
+  _ env: UnsafeMutablePointer<emacs_env>?,
+  _ nargs: Int,
+  _ args: UnsafeMutablePointer<emacs_value?>?,
+  _ data: UnsafeMutableRawPointer?) -> emacs_value?
+{
+    if let env {
+        do {
+            if let args, let eventId = try String.fromEmacsVal(env, args[0]) {
+                try AuthorizeCalendar(env)
+
+                let event_data = eventStore.event(withIdentifier: eventId)
+                if let event_data{
+                    return maccalfw_event_to_plist(env, event_data,
+                                                   event_data.calendar.calendarIdentifier)
+                }
+                else {
+                    throw EmacsError.error("Failed to fetch event.")
+                }
+            }
         }
         catch {
             emacs_process_error(env, error)
