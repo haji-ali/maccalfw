@@ -198,7 +198,9 @@ This command displays any CALENDARS obtained using
                                (plist-get x :id)
                                (plist-get x :color)))
     calendars)
-   :sorter #'calfw-blocks-default-sorter))
+   :sorter (if (fboundp #'calfw-blocks-default-sorter)
+               #'calfw-blocks-default-sorter
+             #'string-lessp)))
 
 (provide 'maccalfw)
 ;;; maccalfw.el ends here
