@@ -362,12 +362,12 @@ public func emacs_module_init(_ runtime: UnsafeMutablePointer<emacs_runtime>) ->
         Qt = env.pointee.make_global_ref(env, env.pointee.intern(env, "t"))
 
         emacs_defun(env, "maccalfw-get-calendars", 0, 0, maccalfw_get_calendars,
-                    """
+"""
 Get a list of Mac calendars.
 Each item in the list contains contains id, title, color and an editable predicated.
 """)
         emacs_defun(env, "maccalfw-fetch-events", 3, 3, maccalfw_fetch_events,
-                    """
+"""
 Get a list of events in a calendar.
 Takes as arguments the CALENDAR-ID, START-TIME and END-TIME.
 The times are encoded times.
@@ -386,18 +386,12 @@ Note that if the event has a different `:calendar-id`, the event moved to
 the new calendar.
 """)
 
+        emacs_defun(env, "maccalfw-get-event", 1, 1, maccalfw_remove_event,
+                    "Return event details given its ID.")
         emacs_defun(env, "maccalfw-remove-event", 1, 1, maccalfw_remove_event,
-"""
-Remove an event given its ID.
-""")
-
+                    "Remove an event given its ID.")
         emacs_defun(env, "maccalfw-timezones", 0, 0, maccalfw_timezones,
-"""
-Returns a list of system timezones.
-""")
-
-        emacs_defun(env, "maccalfw--test", 1, 1, maccalfw_test,
-                    "This is a simple test function")
+                    "Returns a list of system timezones.")
     }
     return 0
 }
