@@ -106,6 +106,9 @@ abort `\\[calfw-event-kill]'.")))
 	 (inhibit-modification-hooks t))
     (add-text-properties field-begin field-end `(invisible ,visible))))
 
+(defvar org-time-was-given)
+(defvar org-end-time-was-given)
+
 (defun calfw-event-date-field-pick ()
   (interactive)
   (let* ((start-time-wid (plist-get calfw-event--widgets :start-time))
@@ -133,10 +136,8 @@ abort `\\[calfw-event-kill]'.")))
                     "Event"
                     start-time
                     nil nil))
-
     (widget-value-set start-date-wid
-                      (format-time-string "%F"
-                                          new-time))
+                      (format-time-string "%F" new-time))
 
     (when org-time-was-given
       ;; Update time as well
