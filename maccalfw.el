@@ -119,12 +119,13 @@ The event is returned `maccalfw-fetch-events'."
      :start-time  (unless all-day-p
                     (maccalfw--decode-time start))
      :end-date    (when all-day-p
-                      (maccalfw--decode-date end))
+                    (maccalfw--decode-date end))
      :end-time    (unless all-day-p
                     (maccalfw--decode-time end))
      :title       (plist-get event :title)
      :location    (plist-get event :location)
      :description (plist-get event :summary)
+     :status       (plist-get event :status)
      :data        event)))
 
 (defun maccalfw--convert-to-calfw (events-list)
