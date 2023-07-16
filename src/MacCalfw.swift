@@ -74,12 +74,11 @@ private func maccalfw_get_calendars(_ env: UnsafeMutablePointer<emacs_env>?,
 }
 
 private func maccalfw_event_to_plist(_ env: UnsafeMutablePointer<emacs_env>,
-                                     _ event_data : EKEvent,
-                                     _ calendar_id : String?) -> emacs_value?
+                                     _ event_data : EKEvent) -> emacs_value?
 {
     let event_plist : [String : EmacsCastable?] =
       [":id" : event_data.eventIdentifier,
-       ":calendar-id" : calendar_id,
+       ":calendar-id" : event_data.calendar.calendarIdentifier,
        ":title" :event_data.title,
        ":location" : event_data.location,
        ":notes" : event_data.hasNotes ? event_data.notes : nil,
@@ -127,7 +126,7 @@ private func maccalfw_fetch_events(
 
             let events = eventStore.events(matching: calendarEventsPredicate)
             let list : [EmacsCastable?] =
-              Array(events.map {return maccalfw_event_to_plist(env, $0, calendar_id)})
+              Array(events.map {return maccalfw_event_to_plist(env, $0)})
             return list.toEmacsVal(env)
         }
             else {
@@ -158,8 +157,7 @@ private func maccalfw_get_event(
 
                 let event_data = eventStore.event(withIdentifier: eventId)
                 if let event_data{
-                    return maccalfw_event_to_plist(env, event_data,
-                                                   event_data.calendar.calendarIdentifier)
+                    return maccalfw_event_to_plist(env, event_data)
                 }
                 else {
                     throw EmacsError.error("Failed to fetch event.")
@@ -245,7 +243,7 @@ private func maccalfw_update_event(
 
         do {
             try eventStore.save(event, span: .thisEvent)
-            return event.eventIdentifier.toEmacsVal(env)
+            return maccalfw_event_to_plist(env, event)
         } catch {
                     throw EmacsError.error("Failed to save event with error: \(error.localizedDescription)")
                 }
