@@ -48,15 +48,20 @@ private func maccalfw_get_calendars(_ env: UnsafeMutablePointer<emacs_env>?,
         let Qtitle = env.pointee.intern(env, ":title")
         let Qcolor = env.pointee.intern(env, ":color")
         let Qeditable = env.pointee.intern(env, ":editable")
+        let Qdefault = env.pointee.intern(env, ":default")
+        let defaultCal = eventStore.defaultCalendarForNewEvents?.calendarIdentifier
         let list : [EmacsCastable?] =
           Array(calendars.map
                 {
-                    let calendar_data : [emacs_value? : EmacsCastable?] =
+                    var calendar_data : [emacs_value? : EmacsCastable?] =
                       [Qid : $0.calendarIdentifier,
                        Qtitle: $0.title,
                        Qcolor : $0.color.hexString,
                                            Qeditable :
-                         ($0.allowsContentModifications ? Qt : nil)]
+                                             ($0.allowsContentModifications ? Qt : nil)]
+                    if ($0.calendarIdentifier == defaultCal){
+                        calendar_data[Qdefault] = Qt
+                    }
                     return calendar_data.toEmacsVal(env)
                 })
         return list.toEmacsVal(env)
