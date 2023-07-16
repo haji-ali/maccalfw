@@ -48,23 +48,27 @@
   :full t
   :parent widget-keymap
   "C-c C-k" #'maccalfw-event-kill
+  "C-c C-s" #'maccalfw-event-date-field-pick
   "C-c C-w" #'maccalfw-event-save
-  "C-c C-s" #'maccalfw-event-date-field-pick)
+  "C-x C-s" #'maccalfw-event-save)
 
 (defvar-keymap maccalfw-event-field-map
   :doc "Keymap for fields in `maccalfw-event'."
   :full t
   :parent widget-field-keymap
   "C-c C-k" #'maccalfw-event-kill
+  "C-c C-s" #'maccalfw-event-date-field-pick
   "C-c C-w" #'maccalfw-event-save
-  "C-c C-s" #'maccalfw-event-date-field-pick)
+  "C-x C-s" #'maccalfw-event-save)
 
 (define-derived-mode maccalfw-event-mode fundamental-mode "Calendar Event"
   "Major mode for editing calendar events."
   :lighter " Calfw event"
-  (use-local-map maccalfw-event-mode-map))
+  (use-local-map maccalfw-event-mode-map)
+  (make-local-variable 'kill-buffer-query-functions)
+  (add-to-list 'kill-buffer-query-functions
+               'maccalfw-event-save-maybe))
 
-(defvar-local maccalfw-event--data nil)
 (defvar-local maccalfw-event--widgets nil)
 
 (defvar maccalfw-event--timezones (maccalfw-timezones))
@@ -75,13 +79,86 @@
 
 (defun maccalfw-event-kill ()
   (interactive)
-  ;; TODO: Check modified buffer
-  (quit-window t))
+  (when (maccalfw-event-save-maybe)
+    ;; If `maccalfw-event-save-maybe' return t, then ignore modifications
+    (set-buffer-modified-p nil)
+    (quit-window t)))
 
 (defun maccalfw-event-save ()
   (interactive)
-  ;; TODO
-  )
+  (let* ((old-data (widget-get (maccalfw-event--get-widget 'title)
+                               :event-data))
+         (tz (widget-value (maccalfw-event--get-widget 'timezone)))
+         (start (maccalfw-event--parse-datetime
+                 (widget-value (maccalfw-event--get-widget 'start-time))
+                 (widget-value (maccalfw-event--get-widget 'start-date))
+                 tz))
+         (end (maccalfw-event--parse-datetime
+               (widget-value (maccalfw-event--get-widget 'end-time))
+               (widget-value (maccalfw-event--get-widget 'end-date))
+               tz))
+         (new-data
+          (list
+           :id (plist-get old-data :id)
+           :calendar-id (widget-value (maccalfw-event--get-widget 'calendar-id))
+           :title (widget-value (maccalfw-event--get-widget 'title))
+           :timezone tz
+           :all-day-p (widget-value (maccalfw-event--get-widget 'all-day))
+           :url (widget-value (maccalfw-event--get-widget 'url))
+           :location (widget-value (maccalfw-event--get-widget 'location))
+           :availability (widget-value (maccalfw-event--get-widget
+                                        'availability))
+           :notes (widget-value (maccalfw-event--get-widget 'notes))))
+         (diff-data))
+    ;; Only keep old-data
+    (if (plist-get old-data :id)
+      (progn (while new-data
+               (let* ((key (car new-data))
+                      (val (cadr new-data))
+                      (old-val (plist-get old-data key)))
+                 (unless (or (equal val old-val)
+                             (and (null old-val) (equal val "")))
+                   (setq diff-data (append diff-data (list key val))))
+                 (setq new-data (cddr new-data))))
+             (unless (time-equal-p start (plist-get old-data :start))
+               (plist-put diff-data :start start))
+             (unless (time-equal-p end (plist-get old-data :end))
+               (plist-put diff-data :end end))
+             (when diff-data
+               (setq new-data
+                     (plist-put diff-data :id (plist-get old-data :id)))))
+      (plist-put new-data :start start)
+      (plist-put new-data :end end))
+    (when new-data
+      (maccalfw-update-event new-data)
+      (when (interactive-p)
+        (message "Event saved.")
+        ;; TODO: Once saved, need to update the date in the title widget or
+        ;; re-fetch the event and upate the buffer.
+        ;; TODO: Call a hook so that we can use it to update the calendar
+        ;; buffer.
+        ))
+    (set-buffer-modified-p nil)))
+
+(defun maccalfw-event-save-maybe ()
+  (if (not (buffer-modified-p))
+      t
+    (let ((response
+           (cadr
+            (read-multiple-choice
+             (format "Event %s modified; kill anyway?"
+                     (buffer-name))
+             '((?y "yes" "kill buffer without saving")
+               (?n "no" "exit without doing anything")
+               (?s "save and then kill" "save the even and then kill buffer"))
+             nil nil (and (not use-short-answers)
+                          (not (use-dialog-box-p)))))))
+      (if (equal response "no")
+          nil
+        (unless (equal response "yes")
+          (maccalfw-event-save)
+          t)
+        t))))
 
 (defface maccalfw-event-notes-field
   '((t
@@ -117,32 +194,34 @@
 (defvar org-end-time-was-given)
 
 (defun maccalfw-event--get-widget (key)
-  (plist-get maccalfw-event--widgets key))
+  (plist-get maccalfw-event--widgets key)
+  ;; TODO: We can use `widget-forward' to get everything but it doesn't work
+  ;; with hidden .
+  )
 
 (defun maccalfw-event--create-wid (key &rest args)
-  ;; TODO: The calling conventions is weird.
-  ;; Since 'key (like :title) is following by widget type
-  ;; (like 'editable-field)
   (setq
-     maccalfw-event--widgets
-     (plist-put
-      maccalfw-event--widgets
-      key (apply 'widget-create args))))
+   maccalfw-event--widgets
+   (plist-put maccalfw-event--widgets key (apply 'widget-create args)))
+  ;; (let ((wid (apply 'widget-create args)))
+  ;;   (widget-put wid :event-field key)
+  ;;   wid)
+  )
 
 (defun maccalfw-event-date-field-pick (for-end-date)
   (interactive (list
                 (or current-prefix-arg
                     (eq (widget-at (point))
-                        (maccalfw-event--get-widget :end-time))
+                        (maccalfw-event--get-widget 'end-time))
                     (eq (widget-at (point))
-                        (maccalfw-event--get-widget :end-date)))))
+                        (maccalfw-event--get-widget 'end-date)))))
 
-  (let* ((start-time-wid (maccalfw-event--get-widget :start-time))
-         (start-date-wid (maccalfw-event--get-widget :start-date))
-         (end-time-wid (maccalfw-event--get-widget :end-time))
-         (end-date-wid (maccalfw-event--get-widget :end-date))
-         (timezone-wid (maccalfw-event--get-widget :timezone))
-         (all-day-wid (maccalfw-event--get-widget :all-day))
+  (let* ((start-time-wid (maccalfw-event--get-widget 'start-time))
+         (start-date-wid (maccalfw-event--get-widget 'start-date))
+         (end-time-wid (maccalfw-event--get-widget 'end-time))
+         (end-date-wid (maccalfw-event--get-widget 'end-date))
+         (timezone-wid (maccalfw-event--get-widget 'timezone))
+         (all-day-wid (maccalfw-event--get-widget 'all-day))
          (start-time
           (maccalfw-event--parse-datetime
            (widget-value start-time-wid)
@@ -235,8 +314,8 @@ function).
   (let* ((old-tz (widget-get widget :old-value))
          (tz (widget-value widget)))
     (save-excursion
-      (cl-loop for (date-wid . time-wid) in '((:start-date :start-time)
-                                              (:end-date :end-time))
+      (cl-loop for (date-wid . time-wid) in '((start-date . start-time)
+                                              (end-date . end-time))
                for time-widget = (maccalfw-event--get-widget time-wid)
                for date-widget = (maccalfw-event--get-widget date-wid)
                do
@@ -253,14 +332,13 @@ function).
 (defun maccalfw-event--all-day-notify (checkbox &rest _)
   (let ((checked (widget-value checkbox)))
     (maccalfw-event--show-hide-widget
-     (maccalfw-event--get-widget
-                :end-date)
+     (maccalfw-event--get-widget 'end-date)
      (not checked))
     (mapc
      (lambda (x)
        (when-let (field (maccalfw-event--get-widget x))
          (maccalfw-event--show-hide-widget field checked)))
-     (list :start-time :end-time :timezone))))
+     '(start-time end-time timezone))))
 
 (defun maccalfw-event--create-form (event)
   (let ((timezone (or (plist-get event :timezone)
@@ -268,8 +346,8 @@ function).
     (widget-insert "\n\n")
 
     (maccalfw-event--create-wid
-     :title
-     'editable-field
+     'title 'editable-field
+     :event-data event
      :keymap maccalfw-event-field-map
      :value-face 'maccalfw-event-title-field
      :format " %v \n" ; Text after the field!
@@ -283,7 +361,7 @@ function).
                      cals)))
       (apply
        'maccalfw-event--create-wid
-       :calendar-id
+       'calendar-id
        'menu-choice
        :tag "Calendar"
        :format " %[%t%]: %v\n\n"
@@ -301,7 +379,7 @@ function).
        options))
 
     (maccalfw-event--create-wid
-     :start-date
+     'start-date
      'editable-field
      :keymap maccalfw-event-field-map
      :format " %v "
@@ -311,7 +389,7 @@ function).
                               (plist-get event :start))))
 
     (maccalfw-event--create-wid
-     :end-date
+     'end-date
      'editable-field
      :keymap maccalfw-event-field-map
      :format "  --    %v   "
@@ -319,7 +397,7 @@ function).
      (format-time-string "%F"
                          (plist-get event :end)))
     (maccalfw-event--create-wid
-     :start-time
+     'start-time
      'editable-field
      :keymap maccalfw-event-field-map
      :format " %v -- "
@@ -328,7 +406,7 @@ function).
       (plist-get event :start)
       timezone))
     (maccalfw-event--create-wid
-     :end-time
+     'end-time
      'editable-field
      :keymap maccalfw-event-field-map
      :format " %v   "
@@ -337,7 +415,7 @@ function).
       (plist-get event :end)
       timezone))
     (maccalfw-event--create-wid
-     :all-day
+     'all-day
      'checkbox
      :format " %[%v%] All day\n\n"
      :notify #'maccalfw-event--all-day-notify
@@ -353,7 +431,7 @@ function).
                      maccalfw-event--timezones)))
       (apply
        'maccalfw-event--create-wid
-       :timezone
+       'timezone
        'menu-choice
        :notify #'maccalfw-event--timezone-widget-notify
        :tag "Timezone"
@@ -363,10 +441,10 @@ function).
        options))
 
     (maccalfw-event--all-day-notify
-     (maccalfw-event--get-widget :all-day))
+     (maccalfw-event--get-widget 'all-day))
 
     (maccalfw-event--create-wid
-     :url
+     'location
      'editable-field
      :keymap maccalfw-event-field-map
      :format
@@ -386,20 +464,18 @@ function).
        org "\n\n"))
 
     (maccalfw-event--create-wid
-     :availability
+     'availability
      'radio-button-choice
      :entry-format "  %b %v "
      :inline t
      :format " %v\n\n"
-     :value (when-let (avail (or (plist-get event :availability)
-                                 'busy))
-              (symbol-name avail))
+     :value (or (plist-get event :availability) 'busy)
      '(item :format "%[Tentative%] " :value tentative)
      '(item :format "%[Free%] " :value free)
      '(item :format "%[Busy%] " :value busy)
      '(item :format "%[Unavailable%] " :value unavailable))
     (maccalfw-event--create-wid
-     :url
+     'url
      'editable-field
      :keymap maccalfw-event-field-map
      :format
@@ -409,9 +485,9 @@ function).
      (or (plist-get event :url) ""))
 
     (maccalfw-event--create-wid
-     :notes
-     'text
+     'notes 'text
      :format "%v" ; Text after the field!
+     :keymap maccalfw-event-field-map
      :value-face 'maccalfw-event-notes-field
      (or (plist-get event :notes) ""))
 
@@ -423,7 +499,6 @@ function).
 
 (defun maccalfw-event-open (event)
   (pop-to-buffer (generate-new-buffer "*calender event*"))
-  (setq-local maccalfw-event--data event)
   (maccalfw-event-mode)
   (maccalfw-event--create-form event)
 
@@ -484,12 +559,22 @@ abort `\\[maccalfw-event-kill]'."))
        (cfw:event-data event))
     (error "No event at location")))
 
-(let ((keymap (make-sparse-keymap)))
-  (define-key keymap [13] #'maccalfw-event-goto-details)
-  (define-key keymap [double-mouse-1] #'maccalfw-event-goto-details)
-  (define-key keymap [down-mouse-1] #'maccalfw-event-mouse-down)
-  (setq calfw-blocks-event-keymap keymap))
+(defun maccalfw-event-delete-event ()
+  (interactive)
+  (if-let ((event (get-text-property (point) 'cfw:event)))
+      (prog1 (maccalfw-remove-event
+              (plist-get (cfw:event-data event) :id))
+        (message "Event deleted")
+        (cfw:refresh-calendar-buffer nil))
+    (error "No event at location")))
 
+(setq calfw-blocks-event-keymap
+      (let ((keymap (make-sparse-keymap)))
+        (define-key keymap (kbd "C-d") #'maccalfw-event-delete-event)
+        (define-key keymap [13] #'maccalfw-event-goto-details)
+        (define-key keymap [double-mouse-1] #'maccalfw-event-goto-details)
+        (define-key keymap [down-mouse-1] #'maccalfw-event-mouse-down)
+        keymap))
 (define-key cfw:calendar-mode-map "c" 'maccalfw-event-new-event)
 
 (provide 'maccalfw-event)
