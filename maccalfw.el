@@ -37,6 +37,7 @@
 ;;; Code:
 
 (require 'calfw)
+(require 'wid-edit)
 
 (defcustom maccalfw-event-save-hook nil
   "Hook called when an event is saved successfully.
