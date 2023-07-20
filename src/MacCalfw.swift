@@ -111,31 +111,49 @@ private func maccalfw_fetch_events(
 {
     if let env {
         do {
-        if let args, let name = args[0],
-               let calendar_id = try String.fromEmacsVal(env, name) {
-                try AuthorizeCalendar(env)
+            if let args, let name = args[0],
+               let argStart = args[1],
+               let argEnd = args[2] {
+                let calendar_id = try String.fromEmacsVal(env, name)
+                let start = try Date.fromEmacsVal(env, argStart)
+                let end = try Date.fromEmacsVal(env, argEnd)
 
-            if let calendar = eventStore.calendar(withIdentifier: calendar_id) {
-                    let start = try Date.fromEmacsVal(env, args[1]!)
-                    let end = try Date.fromEmacsVal(env, args[2]!)
+                if let start, let end {
+                    try AuthorizeCalendar(env)
 
-            let calendarEventsPredicate =
-              eventStore.predicateForEvents(withStart: start!,
-                                            end: end!,
-                                            calendars: [calendar])
+                    var calendarEventsPredicate : NSPredicate
 
-            let events = eventStore.events(matching: calendarEventsPredicate)
-            let list : [EmacsCastable?] =
-              Array(events.map {return maccalfw_event_to_plist(env, $0)})
-            return list.toEmacsVal(env)
-        }
-            else {
-                throw EmacsError.error("Cannot retrieve calendar.")
+                    if calendar_id == nil {
+                        calendarEventsPredicate =
+                          eventStore.predicateForEvents(withStart: start,
+                                                        end: end,
+                                                        calendars: nil)
+                    }
+                    else {
+                        if let calendar = eventStore.calendar(withIdentifier:
+                                                                calendar_id!) {
+                            calendarEventsPredicate =
+                              eventStore.predicateForEvents(withStart: start,
+                                                            end: end,
+                                                            calendars: [calendar])
+                        }
+                        else {
+                            throw EmacsError.error("Cannot retrieve calendar.")
+                        }
+                    }
+
+                    let events = eventStore.events(matching: calendarEventsPredicate)
+                    let list : [EmacsCastable?] =
+                      Array(events.map {return maccalfw_event_to_plist(env, $0)})
+                    return list.toEmacsVal(env)
+                }
+                else {
+                    throw EmacsError.wrong_type_argument("Wrong type for wrong arguments")
+                }
             }
-        }
-        else {
-            throw EmacsError.wrong_type_argument("Wrong type for calendar id")
-        }
+            else {
+                throw EmacsError.wrong_type_argument("Wrong arguments")
+            }
         }
         catch {
             emacs_process_error(env, error)
