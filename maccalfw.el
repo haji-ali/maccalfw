@@ -94,11 +94,8 @@ Takes one argument which is the new event data."
                'maccalfw-event-save-maybe))
 
 (defvar-local maccalfw-event--widgets nil)
-(defvar maccalfw-event--timezones (maccalfw-timezones))
-(defvar maccalfw-event--default-timezone
-  (cl-find-if
-   (lambda (x) (plist-get (cdr x) :default))
-   maccalfw-event--timezones))
+(defvar maccalfw-event--timezones nil)
+(defvar maccalfw-event--default-timezone nil)
 
 ;; These need to be dynamically bound when using `org-pick-date'
 (defvar org-time-was-given)
@@ -598,6 +595,14 @@ function).
      :notify #'maccalfw-event--all-day-notify
      (plist-get event :all-day-p))
 
+    (unless maccalfw-event--timezones
+      (setq
+       maccalfw-event--timezones (maccalfw-timezones)
+       maccalfw-event--default-timezone
+       (cl-find-if
+        (lambda (x) (plist-get (cdr x) :default))
+        maccalfw-event--timezones)))
+
     (let* ((options (mapcar
                      (lambda (x)
                        `(item :tag ,(format "%s (%s)"
@@ -735,6 +740,13 @@ abort `\\[maccalfw-event-kill]'."))
       (maccalfw-event-open
        (cfw:event-data event))
     (error "No event at location")))
+
+(defun maccalfw-event-make-inactive ()
+  ;; widget-specify-active
+  (mapc (lambda (x)
+          (when (consp x)
+            (widget-apply x :deactivate)))
+        maccalfw-event--widgets))
 
 (defun maccalfw-event-delete-event ()
   (interactive)
