@@ -267,8 +267,6 @@ This command displays any CALENDARS obtained using
              #'string-lessp)))
 
 
-
-
 (defun maccalfw-event-kill ()
   "Kill event buffer.
 Warn if the buffer is modified and offer to save."
@@ -305,6 +303,8 @@ Warn if the buffer is modified and offer to save."
                                         'availability))
            :notes (widget-value (maccalfw-event--get-widget 'notes))))
          (diff-data))
+    (if (plist-get old-data :read-only)
+        (user-error "Event is not editable."))
     ;; Only keep old-data
     (if (plist-get old-data :id)
         (progn (while new-data
@@ -390,64 +390,66 @@ Warn if the buffer is modified and offer to save."
                     (eq (widget-at (point))
                         (maccalfw-event--get-widget 'end-date)))))
 
-  (let* ((start-time-wid (maccalfw-event--get-widget 'start-time))
-         (start-date-wid (maccalfw-event--get-widget 'start-date))
-         (end-time-wid (maccalfw-event--get-widget 'end-time))
-         (end-date-wid (maccalfw-event--get-widget 'end-date))
-         (timezone-wid (maccalfw-event--get-widget 'timezone))
-         (all-day-wid (maccalfw-event--get-widget 'all-day))
-         (start-time
-          (maccalfw-event--parse-datetime
-           (widget-value start-time-wid)
-           (widget-value start-date-wid)))
-         (end-time
-          (maccalfw-event--parse-datetime
-           (widget-value end-time-wid)
-           (widget-value end-date-wid)))
-         (all-day-p  (widget-value all-day-wid))
-         ;; Define these two to make sure they are bound for `org-read-date'
-         org-time-was-given
-         org-end-time-was-given
-         (new-time (org-read-date
-                    (not (widget-value all-day-wid))
-                    t
-                    nil
-                    "Event"
-                    (if for-end-date
-                        end-time
-                      start-time)))
-         new-end-time)
-    (save-excursion
-      (widget-value-set (if (and for-end-date all-day-p)
-                            end-date-wid
-                          start-date-wid)
-                        (format-time-string "%F" new-time))
+  (if (widget-get (maccalfw-event--get-widget 'start-time) :inactive)
+      (maccalfw-event-read-only)
+    (let* ((start-time-wid (maccalfw-event--get-widget 'start-time))
+           (start-date-wid (maccalfw-event--get-widget 'start-date))
+           (end-time-wid (maccalfw-event--get-widget 'end-time))
+           (end-date-wid (maccalfw-event--get-widget 'end-date))
+           (timezone-wid (maccalfw-event--get-widget 'timezone))
+           (all-day-wid (maccalfw-event--get-widget 'all-day))
+           (start-time
+            (maccalfw-event--parse-datetime
+             (widget-value start-time-wid)
+             (widget-value start-date-wid)))
+           (end-time
+            (maccalfw-event--parse-datetime
+             (widget-value end-time-wid)
+             (widget-value end-date-wid)))
+           (all-day-p  (widget-value all-day-wid))
+           ;; Define these two to make sure they are bound for `org-read-date'
+           org-time-was-given
+           org-end-time-was-given
+           (new-time (org-read-date
+                      (not (widget-value all-day-wid))
+                      t
+                      nil
+                      "Event"
+                      (if for-end-date
+                          end-time
+                        start-time)))
+           new-end-time)
+      (save-excursion
+        (widget-value-set (if (and for-end-date all-day-p)
+                              end-date-wid
+                            start-date-wid)
+                          (format-time-string "%F" new-time))
 
-      (when (and (not for-end-date) all-day-p)
-        ;; Shift end date as well
-        (widget-value-set
-         end-date-wid
-         (format-time-string "%F"
-                             (time-add new-time
-                                       (* (- (time-to-days end-time)
-                                             (time-to-days start-time))
-                                          24 60 60)))))
+        (when (and (not for-end-date) all-day-p)
+          ;; Shift end date as well
+          (widget-value-set
+           end-date-wid
+           (format-time-string "%F"
+                               (time-add new-time
+                                         (* (- (time-to-days end-time)
+                                               (time-to-days start-time))
+                                            24 60 60)))))
 
-      (when (and (not all-day-p) org-time-was-given)
-        ;; Update time as well
-        (if (or (not for-end-date) org-end-time-was-given)
-            (progn
-              (widget-value-set start-time-wid
-                                (maccalfw-event--format-time new-time))
-              (widget-value-set end-time-wid
-                                (or org-end-time-was-given
-                                    (maccalfw-event--format-time
-                                     (time-add new-time
-                                               (time-subtract end-time
-                                                              start-time))))))
-          ;; for-end-date and range not given
-          (widget-value-set end-time-wid
-                            (maccalfw-event--format-time new-time)))))))
+        (when (and (not all-day-p) org-time-was-given)
+          ;; Update time as well
+          (if (or (not for-end-date) org-end-time-was-given)
+              (progn
+                (widget-value-set start-time-wid
+                                  (maccalfw-event--format-time new-time))
+                (widget-value-set end-time-wid
+                                  (or org-end-time-was-given
+                                      (maccalfw-event--format-time
+                                       (time-add new-time
+                                                 (time-subtract end-time
+                                                                start-time))))))
+            ;; for-end-date and range not given
+            (widget-value-set end-time-wid
+                              (maccalfw-event--format-time new-time))))))))
 
 (defun maccalfw-event--format-time (time &optional timezone)
   ;; Assume time is in the default timezone
@@ -528,11 +530,15 @@ function).
      (or (plist-get event :title) ""))
 
     (let* ((cals (maccalfw-get-calendars))
-           (options (mapcar
-                     (lambda (x)
-                       `(item :tag ,(plist-get x :title)
-                              :value ,(plist-get x :id)))
-                     cals)))
+           (options (cl-loop
+                     for x in cals
+                     when (or (plist-get x :editable)
+                              (equal (plist-get x :id)
+                                     (plist-get event :calendar-id)))
+                     collect
+                     `(item :tag ,(plist-get x :title)
+                            :value ,(plist-get x :id)
+                            :editable ,(plist-get x :editable)))))
       (apply
        'maccalfw-event--create-wid
        'calendar-id
@@ -677,7 +683,9 @@ function).
     (goto-char (point-min))
     (widget-move 1) ;; Go to next widget (should be title)
     (widget-end-of-line) ;; Go to end of line
-    ))
+
+    (when (plist-get event :read-only)
+      (maccalfw-event-make-inactive))))
 
 (defun maccalfw-event-open (event)
   (pop-to-buffer (generate-new-buffer "*calender event*"))
@@ -701,26 +709,6 @@ abort `\\[maccalfw-event-kill]'."))
         (setcar (nthcdr 2 start-event) 1))
     (mouse-drag-region start-event)))
 
-(defun maccalfw-event-activate-widgets (active)
-  ""
-  (save-excursion
-    (goto-char (point-min))
-    ;; Surely there's a better way to find all the "top level" widgets
-    ;; in a buffer, but I couldn't find it.
-    (while (not (eobp))
-      (when-let* ((widget (widget-at (point)))
-                  ;;(parent (widget-get widget :parent))
-                  ;;(active (widget-get parent :active))
-                  )
-        (unless (eq (widget-get widget :inactive)
-                    (not active))
-          (if active
-              (widget-apply widget :activate)
-            (widget-apply widget :deactivate))))
-      (forward-char 1))))
-
-;; TODO: Not sure where to put these following two functions. They depend on
-;; both maccalfw-even and calfw-blocks
 (defun maccalfw-event-new-event (start &optional end all-day)
   (interactive (if (and (derived-mode-p 'cfw:calendar-mode)
                         ;; TODO: Check that the view is indeed a block
@@ -741,12 +729,51 @@ abort `\\[maccalfw-event-kill]'."))
        (cfw:event-data event))
     (error "No event at location")))
 
-(defun maccalfw-event-make-inactive ()
+(defun maccalfw-event-activate-widgets (active)
+  ""
+  (save-excursion
+    (goto-char (point-min))
+    ;; Surely there's a better way to find all the "top level" widgets
+    ;; in a buffer, but I couldn't find it.
+    (while (not (eobp))
+      (when-let* ((widget (widget-at (point)))
+                  ;;(parent (widget-get widget :parent))
+                  ;;(active (widget-get parent :active))
+                  )
+        (unless (eq (widget-get widget :inactive)
+                    (not active))
+          (if active
+              (widget-apply widget :activate)
+            (widget-apply widget :deactivate))))
+      (forward-char 1))))
+
+(defun maccalfw-event-read-only (&rest _junk)
+  "Ignoring the arguments, signal an error."
+  (unless inhibit-read-only
+    (error "The event is read-only")))
+
+(defun maccalfw-event-make-inactive (&optional active)
   ;; widget-specify-active
-  (mapc (lambda (x)
-          (when (consp x)
-            (widget-apply x :deactivate)))
-        maccalfw-event--widgets))
+  ;; How to properly loop over a plist?
+  (cl-loop for (key widget) on
+           maccalfw-event--widgets by #'cddr
+           do
+           (unless (eq (null (widget-get widget :inactive))
+                       (not (null active)))
+             (if active
+                 (progn
+                   (delete-overlay (widget-get widget :inactive))
+                   (widget-put widget :inactive nil))
+               (let* ((from (widget-get widget :from))
+                      (to (widget-get widget :to))
+                      (overlay (make-overlay from to nil t nil)))
+                 ;; This is disabled, as it makes the mouse cursor change shape.
+                 ;; (overlay-put overlay 'mouse-face 'widget-inactive)
+                 (overlay-put overlay 'evaporate t)
+                 (overlay-put overlay 'priority 100)
+                 (overlay-put overlay 'modification-hooks
+                              '(maccalfw-event-read-only))
+                 (widget-put widget :inactive overlay))))))
 
 (defun maccalfw-event-delete-event ()
   (interactive)

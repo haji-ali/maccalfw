@@ -93,6 +93,8 @@ private func maccalfw_event_to_plist(_ env: UnsafeMutablePointer<emacs_env>,
        ":status" : event_data.status.toEmacsVal(env),
        ":availability" : event_data.availability.toEmacsVal(env),
        ":organizer" : event_data.organizer?.name,
+       ":read-only" : ((event_data.organizer?.isCurrentUser ?? true) &&
+                         event_data.calendar.allowsContentModifications) ? nil : Qt,
        ":url" : event_data.url?.absoluteString]
 
     let quoted_plist =
