@@ -282,12 +282,17 @@ Warn if the buffer is modified and offer to save."
   (let* ((title-wid (maccalfw-event--get-widget 'title))
          (old-data (widget-get title-wid :event-data))
          (tz (widget-value (maccalfw-event--get-widget 'timezone)))
+         (all-day (widget-value (maccalfw-event--get-widget 'all-day)))
          (start (maccalfw-event--parse-datetime
-                 (widget-value (maccalfw-event--get-widget 'start-time))
+                 (if all-day
+                     "00:00"
+                   (widget-value (maccalfw-event--get-widget 'start-time)))
                  (widget-value (maccalfw-event--get-widget 'start-date))
                  tz))
          (end (maccalfw-event--parse-datetime
-               (widget-value (maccalfw-event--get-widget 'end-time))
+               (if all-day
+                   "23:59"
+                 (widget-value (maccalfw-event--get-widget 'end-time)))
                (widget-value (maccalfw-event--get-widget 'end-date))
                tz))
          (new-data
@@ -296,7 +301,7 @@ Warn if the buffer is modified and offer to save."
            :calendar-id (widget-value (maccalfw-event--get-widget 'calendar-id))
            :title (widget-value title-wid)
            :timezone tz
-           :all-day-p (widget-value (maccalfw-event--get-widget 'all-day))
+           :all-day-p all-day
            :url (widget-value (maccalfw-event--get-widget 'url))
            :location (widget-value (maccalfw-event--get-widget 'location))
            :availability (widget-value (maccalfw-event--get-widget
@@ -307,6 +312,7 @@ Warn if the buffer is modified and offer to save."
         (user-error "Event is not editable."))
     ;; Only keep old-data
     (if (plist-get old-data :id)
+        ;; TODO: Don't save empty fields even when an event is new!
         (progn (while new-data
                  (let* ((key (car new-data))
                         (val (cadr new-data))
@@ -398,15 +404,19 @@ Warn if the buffer is modified and offer to save."
            (end-date-wid (maccalfw-event--get-widget 'end-date))
            (timezone-wid (maccalfw-event--get-widget 'timezone))
            (all-day-wid (maccalfw-event--get-widget 'all-day))
+           (all-day-p  (widget-value all-day-wid))
            (start-time
             (maccalfw-event--parse-datetime
-             (widget-value start-time-wid)
+             (if all-day-p
+                 "00:00"
+               (widget-value start-time-wid))
              (widget-value start-date-wid)))
            (end-time
             (maccalfw-event--parse-datetime
-             (widget-value end-time-wid)
+             (if all-day-p
+                 "23:59"
+               (widget-value end-time-wid))
              (widget-value end-date-wid)))
-           (all-day-p  (widget-value all-day-wid))
            ;; Define these two to make sure they are bound for `org-read-date'
            org-time-was-given
            org-end-time-was-given
@@ -425,7 +435,7 @@ Warn if the buffer is modified and offer to save."
                             start-date-wid)
                           (format-time-string "%F" new-time))
 
-        (when (and (not for-end-date) all-day-p)
+        (when (not for-end-date)
           ;; Shift end date as well
           (widget-value-set
            end-date-wid
@@ -465,7 +475,8 @@ Warn if the buffer is modified and offer to save."
            (plist-get (cdr maccalfw-event--default-timezone) :offset)))
        time))))
 
-(defun maccalfw-event--parse-datetime (date-str time-str &optional timezone)
+(defun maccalfw-event--parse-datetime (date-str time-str &optional timezone
+                                                end-time)
   "Parse time and return the time in the default-time zone."
   (let ((tz (and timezone (alist-get timezone maccalfw-event--timezones
                                      nil nil #'equal)))
@@ -499,8 +510,8 @@ function).
                 time-widget
                 (maccalfw-event--format-time
                  (maccalfw-event--parse-datetime
+                  (widget-value time-widget) ;; TODO: Check all-day?
                   (widget-value date-widget)
-                  (widget-value time-widget)
                   old-tz)
                  tz)))
       (widget-put widget :old-value tz))))
