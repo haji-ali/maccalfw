@@ -239,16 +239,19 @@ private func maccalfw_update_event(
             event.endDate = try Date.fromEmacsVal(env, tmp)
         }
         if let tmp = eventData["location"] {
-            event.location = try String.fromEmacsVal(env, tmp)
+                    let str = try String.fromEmacsVal(env, tmp)
+                    event.location = (str?.isEmpty ?? true) ? nil : str
         }
         if let tmp = eventData["notes"] {
             event.notes = try String.fromEmacsVal(env, tmp)
         }
         if let tmp = eventData["url"] {
-            event.url = URL(string: try String.fromEmacsVal(env, tmp) ?? "")
+                    let str = try String.fromEmacsVal(env, tmp)
+                    event.url = (str?.isEmpty ?? true) ? nil : URL(string: str!)
         }
         if let tmp = eventData["timezone"] {
-            event.timeZone = TimeZone(identifier: try String.fromEmacsVal(env, tmp) ?? "")
+                    let str = try String.fromEmacsVal(env, tmp)
+                    event.timeZone = (str?.isEmpty ?? true) ? nil : TimeZone(identifier: str!)
         }
 
         if let tmp = eventData["all-day-p"] {
@@ -402,11 +405,12 @@ Update or create an event.
 Takes as an argument a plist of the EVENT.
 Only the key-value pairs in the plist are updated. If the plist contains a
 non-nil `:id` then the corresponding event is updated. Otherwise, the plist
-must contain `:calendar-id` entry and an event is created and its ID is
-returned.
+must contain `:calendar-id` entry and an event is created.
 
 Note that if the event has a different `:calendar-id`, the event moved to
 the new calendar.
+
+Returns the data of the newly event.
 """)
 
         emacs_defun(env, "maccalfw-get-event", 1, 1, maccalfw_remove_event,
