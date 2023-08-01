@@ -366,12 +366,40 @@ Warn if the buffer is modified and offer to save."
           t)
         t))))
 
+(defun maccalfw-event--widget-overlay (widget key delete &rest props)
+  (unless (eq (null (widget-get widget key))
+              (not (null delete)))
+    (if delete
+        (progn
+          (delete-overlay (widget-get widget key))
+          (widget-put widget key nil))
+      (let* ((from (widget-get widget :from))
+             (to (widget-get widget :to))
+             (overlay (make-overlay from to nil t nil)))
+        (cl-loop for (key val) on
+                 props by #'cddr
+                 do (overlay-put overlay key val))
+        (widget-put widget key overlay)))))
+
 (defun maccalfw-event--show-hide-widget (widget visible)
-  (let* ((field-begin (widget-get widget :from))
-         (field-end (widget-get widget :to))
-         (inhibit-read-only t)
-	 (inhibit-modification-hooks t))
-    (add-text-properties field-begin field-end `(invisible ,visible))))
+  (maccalfw-event--widget-overlay
+   widget
+   :hidden visible
+   'evaporate t
+   'priority 101
+   'invisible (not visible)))
+
+(defun maccalfw-event-make-inactive (&optional active)
+  ;; widget-specify-active
+  ;; How to properly loop over a plist?
+  (cl-loop for (key widget) on
+           maccalfw-event--widgets by #'cddr
+           do
+           (maccalfw-event--widget-overlay
+            widget :inactive active
+            'evaporate t
+            'priority 100
+            'modification-hooks '(maccalfw-event-read-only))))
 
 (defun maccalfw-event--get-widget (key)
   (plist-get maccalfw-event--widgets key)
@@ -520,11 +548,11 @@ function).
   (let ((checked (widget-value checkbox)))
     (maccalfw-event--show-hide-widget
      (maccalfw-event--get-widget 'end-date)
-     (not checked))
+     checked)
     (mapc
      (lambda (x)
        (when-let (field (maccalfw-event--get-widget x))
-         (maccalfw-event--show-hide-widget field checked)))
+         (maccalfw-event--show-hide-widget field (not checked))))
      '(start-time end-time timezone))))
 
 (defun maccalfw-event--create-form (event)
@@ -762,29 +790,6 @@ abort `\\[maccalfw-event-kill]'."))
   "Ignoring the arguments, signal an error."
   (unless inhibit-read-only
     (error "The event is read-only")))
-
-(defun maccalfw-event-make-inactive (&optional active)
-  ;; widget-specify-active
-  ;; How to properly loop over a plist?
-  (cl-loop for (key widget) on
-           maccalfw-event--widgets by #'cddr
-           do
-           (unless (eq (null (widget-get widget :inactive))
-                       (not (null active)))
-             (if active
-                 (progn
-                   (delete-overlay (widget-get widget :inactive))
-                   (widget-put widget :inactive nil))
-               (let* ((from (widget-get widget :from))
-                      (to (widget-get widget :to))
-                      (overlay (make-overlay from to nil t nil)))
-                 ;; This is disabled, as it makes the mouse cursor change shape.
-                 ;; (overlay-put overlay 'mouse-face 'widget-inactive)
-                 (overlay-put overlay 'evaporate t)
-                 (overlay-put overlay 'priority 100)
-                 (overlay-put overlay 'modification-hooks
-                              '(maccalfw-event-read-only))
-                 (widget-put widget :inactive overlay))))))
 
 (defun maccalfw-event-delete-event ()
   (interactive)
