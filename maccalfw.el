@@ -42,7 +42,8 @@
 (defcustom maccalfw-event-save-hook nil
   "Hook called when an event is saved successfully.
 Takes one argument which is the new event data."
-  :type 'hook)
+  :type 'hook
+  :group 'maccalfw)
 
 (defface maccalfw-event-notes-field
   '((t
@@ -333,12 +334,12 @@ Warn if the buffer is modified and offer to save."
         (progn (widget-put title-wid
                            :event-data
                            (maccalfw-update-event new-data))
-               (when (interactive-p)
-                 (message "Event saved.")
+               (when (called-interactively-p 'interactive)
+                 (message "Event saved."))
                  (run-hook-with-args
                   'maccalfw-event-save-hook
-                  (widget-get title-wid :event-data))))
-      (when (interactive-p)
+                (widget-get title-wid :event-data)))
+      (when (called-interactively-p 'interactive)
         (message "(No changes to event to be saved)")))
     (set-buffer-modified-p nil)))
 
@@ -362,6 +363,144 @@ Warn if the buffer is modified and offer to save."
           (maccalfw-event-save)
           t)
         t))))
+
+(defun maccalfw-event-date-field-pick (for-end-date)
+  "Display date picker and assign date fields.
+Sets both start and end dates/times, preserving the duration.
+If FOR-END-DATE is non-nil, set the end-date only."
+  (interactive (list
+                (or current-prefix-arg
+                    (eq (widget-at (point))
+                        (maccalfw-event--get-widget 'end-time))
+                    (eq (widget-at (point))
+                        (maccalfw-event--get-widget 'end-date)))))
+
+  (if (widget-get (maccalfw-event--get-widget 'start-time) :inactive)
+      (maccalfw-event-read-only)
+    (let* ((start-time-wid (maccalfw-event--get-widget 'start-time))
+           (start-date-wid (maccalfw-event--get-widget 'start-date))
+           (end-time-wid (maccalfw-event--get-widget 'end-time))
+           (end-date-wid (maccalfw-event--get-widget 'end-date))
+           (all-day-wid (maccalfw-event--get-widget 'all-day))
+           (all-day-p  (widget-value all-day-wid))
+           (start-time
+            (maccalfw-event--parse-datetime
+             (if all-day-p
+                 "00:00"
+               (widget-value start-time-wid))
+             (widget-value start-date-wid)))
+           (end-time
+            (maccalfw-event--parse-datetime
+             (if all-day-p
+                 "23:59"
+               (widget-value end-time-wid))
+             (widget-value end-date-wid)))
+           ;; Define these two to make sure they are bound for `org-read-date'
+           org-time-was-given
+           org-end-time-was-given
+           (new-time (org-read-date
+                      (not (widget-value all-day-wid))
+                      t
+                      nil
+                      "Event"
+                      (if for-end-date
+                          end-time
+                        start-time))))
+      (save-excursion
+        (widget-value-set (if (and for-end-date all-day-p)
+                              end-date-wid
+                            start-date-wid)
+                          (format-time-string "%F" new-time))
+
+        (when (not for-end-date)
+          ;; Shift end date as well
+          (widget-value-set
+           end-date-wid
+           (format-time-string "%F"
+                               (time-add new-time
+                                         (* (- (time-to-days end-time)
+                                               (time-to-days start-time))
+                                            24 60 60)))))
+
+        (when (and (not all-day-p) org-time-was-given)
+          ;; Update time as well
+          (if (or (not for-end-date) org-end-time-was-given)
+              (progn
+                (widget-value-set start-time-wid
+                                  (maccalfw-event--format-time new-time))
+                (widget-value-set end-time-wid
+                                  (or org-end-time-was-given
+                                      (maccalfw-event--format-time
+                                       (time-add new-time
+                                                 (time-subtract end-time
+                                                                start-time))))))
+            ;; for-end-date and range not given
+            (widget-value-set end-time-wid
+                              (maccalfw-event--format-time new-time))))))))
+
+(defun maccalfw-event-open (event)
+  "Open a buffer to display the details of EVENT."
+  (pop-to-buffer (generate-new-buffer "*calender event*"))
+  (maccalfw-event-mode)
+  (maccalfw-event--create-form event)
+
+  (setq-local
+   header-line-format
+   (substitute-command-keys
+    "\\<maccalfw-event-mode-map>Event details. \
+Save `\\[maccalfw-event-save]', \
+abort `\\[maccalfw-event-kill]'."))
+  (set-buffer-modified-p nil))
+
+(defun maccalfw-event-mouse-down (event)
+  "Call `mouse-drag-region' but disable double clicking.
+Assigning this commend to [down-mouse-1] ensures the commands
+assigned to [double-mouse-1] is called.
+EVENT defaults to the event data."
+  (interactive "e")
+  (let (mouse-selection-click-count)
+    (if (and (consp event)
+             (nthcdr 2 event))
+        (setcar (nthcdr 2 event) 1))
+    (mouse-drag-region event)))
+
+(defun maccalfw-event-new-event (start &optional end all-day)
+  "Create an events-details buffer for a new event.
+START and END default to the start and end times. If ALL-DAY is
+non-nil, default to an all-day event."
+  (interactive (if (and (derived-mode-p 'cfw:calendar-mode)
+                        ;; TODO: Check that the view is indeed a block
+                        ;; (cfw:component-view (cfw:cp-get-component))
+                        ;; should return a block view
+                        (fboundp 'calfw-blocks-region-to-time))
+                   (calfw-blocks-region-to-time)
+                 (list (current-time))))
+  (maccalfw-event-open
+   (list :start start
+         :end (or end (time-add start 3600))
+         :all-day-p all-day)))
+
+(defun maccalfw-event-goto-details (event)
+  "Open event details for the calfw EVENT."
+  (interactive
+   (list (or (get-text-property (point) 'cfw:event)
+             (error "No event at location"))))
+  (maccalfw-event-open (cfw:event-data event)))
+
+(defun maccalfw-event-read-only (&rest _junk)
+  "Ignoring the arguments, signal an error."
+  (unless inhibit-read-only
+    (error "The event is read-only")))
+
+(defun maccalfw-event-delete-event (event)
+  "Delete calfw EVENT."
+  (interactive
+   (list (or (get-text-property (point) 'cfw:event)
+             (error "No event at location"))))
+  (prog1 (maccalfw-remove-event
+          (plist-get (cfw:event-data event) :id))
+    (message "Event deleted")
+    (cfw:refresh-calendar-buffer nil)))
 
 (defun maccalfw-event--widget-overlay (widget key delete &rest props)
   "Create an overlay around WIDGET, setting its PROPS.
@@ -395,7 +534,7 @@ If DELETE is non-nil, delete the widget instead."
 If ACTIVE is t, activate widgets instead"
   ;; widget-specify-active
   ;; How to properly loop over a plist?
-  (cl-loop for (key widget) on
+  (cl-loop for (_ widget) on
            maccalfw-event--widgets by #'cddr
            do
            (maccalfw-event--widget-overlay
@@ -421,82 +560,6 @@ Passes ARGS to `widget-create'"
   ;;   (widget-put wid :event-field key)
   ;;   wid)
   )
-
-(defun maccalfw-event-date-field-pick (for-end-date)
-  "Display date picker and assign date fields.
-Sets both start and end dates/times, preserving the duration.
-If FOR-END-DATE is non-nil, set the end-date only."
-  (interactive (list
-                (or current-prefix-arg
-                    (eq (widget-at (point))
-                        (maccalfw-event--get-widget 'end-time))
-                    (eq (widget-at (point))
-                        (maccalfw-event--get-widget 'end-date)))))
-
-  (if (widget-get (maccalfw-event--get-widget 'start-time) :inactive)
-      (maccalfw-event-read-only)
-    (let* ((start-time-wid (maccalfw-event--get-widget 'start-time))
-           (start-date-wid (maccalfw-event--get-widget 'start-date))
-           (end-time-wid (maccalfw-event--get-widget 'end-time))
-           (end-date-wid (maccalfw-event--get-widget 'end-date))
-           (timezone-wid (maccalfw-event--get-widget 'timezone))
-           (all-day-wid (maccalfw-event--get-widget 'all-day))
-           (all-day-p  (widget-value all-day-wid))
-           (start-time
-            (maccalfw-event--parse-datetime
-             (if all-day-p
-                 "00:00"
-               (widget-value start-time-wid))
-             (widget-value start-date-wid)))
-           (end-time
-            (maccalfw-event--parse-datetime
-             (if all-day-p
-                 "23:59"
-               (widget-value end-time-wid))
-             (widget-value end-date-wid)))
-           ;; Define these two to make sure they are bound for `org-read-date'
-           org-time-was-given
-           org-end-time-was-given
-           (new-time (org-read-date
-                      (not (widget-value all-day-wid))
-                      t
-                      nil
-                      "Event"
-                      (if for-end-date
-                          end-time
-                        start-time)))
-           new-end-time)
-      (save-excursion
-        (widget-value-set (if (and for-end-date all-day-p)
-                              end-date-wid
-                            start-date-wid)
-                          (format-time-string "%F" new-time))
-
-        (when (not for-end-date)
-          ;; Shift end date as well
-          (widget-value-set
-           end-date-wid
-           (format-time-string "%F"
-                               (time-add new-time
-                                         (* (- (time-to-days end-time)
-                                               (time-to-days start-time))
-                                            24 60 60)))))
-
-        (when (and (not all-day-p) org-time-was-given)
-          ;; Update time as well
-          (if (or (not for-end-date) org-end-time-was-given)
-              (progn
-                (widget-value-set start-time-wid
-                                  (maccalfw-event--format-time new-time))
-                (widget-value-set end-time-wid
-                                  (or org-end-time-was-given
-                                      (maccalfw-event--format-time
-                                       (time-add new-time
-                                                 (time-subtract end-time
-                                                                start-time))))))
-            ;; for-end-date and range not given
-            (widget-value-set end-time-wid
-                              (maccalfw-event--format-time new-time))))))))
 
 (defun maccalfw-event--format-time (time &optional timezone)
   "Convert TIME to new TIMEZONE and format it as a string.
@@ -738,70 +801,6 @@ function)."
 
     (when (plist-get event :read-only)
       (maccalfw-event--make-inactive))))
-
-(defun maccalfw-event-open (event)
-  "Open a buffer to display the details of EVENT."
-  (pop-to-buffer (generate-new-buffer "*calender event*"))
-  (maccalfw-event-mode)
-  (maccalfw-event--create-form event)
-
-  (setq-local
-   header-line-format
-   (substitute-command-keys
-    "\\<maccalfw-event-mode-map>Event details. \
-Save `\\[maccalfw-event-save]', \
-abort `\\[maccalfw-event-kill]'."))
-  (set-buffer-modified-p nil))
-
-(defun maccalfw-event-mouse-down (event)
-  "Call `mouse-drag-region' but disable double clicking.
-Assigning this commend to [down-mouse-1] ensures the commands
-assigned to [double-mouse-1] is called.
-EVENT defaults to the event data."
-  (interactive "e")
-  (let (mouse-selection-click-count)
-    (if (and (consp event)
-             (nthcdr 2 event))
-        (setcar (nthcdr 2 event) 1))
-    (mouse-drag-region event)))
-
-(defun maccalfw-event-new-event (start &optional end all-day)
-  "Create an events-details buffer for a new event.
-START and END default to the start and end times. If ALL-DAY is
-non-nil, default to an all-day event."
-  (interactive (if (and (derived-mode-p 'cfw:calendar-mode)
-                        ;; TODO: Check that the view is indeed a block
-                        ;; (cfw:component-view (cfw:cp-get-component))
-                        ;; should return a block view
-                        (fboundp 'calfw-blocks-region-to-time))
-                   (calfw-blocks-region-to-time)
-                 (list (current-time))))
-  (maccalfw-event-open
-   (list :start start
-         :end (or end (time-add start 3600))
-         :all-day-p all-day)))
-
-(defun maccalfw-event-goto-details (event)
-  "Open event details for the calfw EVENT."
-  (interactive
-   (list (or (get-text-property (point) 'cfw:event)
-             (error "No event at location"))))
-  (maccalfw-event-open (cfw:event-data event)))
-
-(defun maccalfw-event-read-only (&rest _junk)
-  "Ignoring the arguments, signal an error."
-  (unless inhibit-read-only
-    (error "The event is read-only")))
-
-(defun maccalfw-event-delete-event (event)
-  "Delete calfw EVENT."
-  (interactive
-   (list (or (get-text-property (point) 'cfw:event)
-             (error "No event at location"))))
-      (prog1 (maccalfw-remove-event
-              (plist-get (cfw:event-data event) :id))
-        (message "Event deleted")
-    (cfw:refresh-calendar-buffer nil)))
 
 (provide 'maccalfw)
 ;;; maccalfw.el ends here
