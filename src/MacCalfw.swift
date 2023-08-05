@@ -113,38 +113,50 @@ private func maccalfw_fetch_events(
 {
     if let env {
         do {
-            if let args, let name = args[0],
+            if let args, let arg0 = args[0],
                let argStart = args[1],
                let argEnd = args[2] {
-                let calendar_id = try String.fromEmacsVal(env, name)
+                var calendar_ids : [String?]? = nil
+                if env.pointee.is_not_nil(env, arg0){
+                    if env.pointee.is_not_nil(
+                         env,
+                         emacs_funcall(env,env.pointee.intern(env, "stringp"),
+                                       [arg0])){
+                        calendar_ids = [try String.fromEmacsVal(env, arg0)]
+                    }
+                    else if env.pointee.is_not_nil(
+                              env,
+                              emacs_funcall(env,env.pointee.intern(env, "listp"),
+                                            [arg0])){
+                        calendar_ids = try emacs_parse_list(env, arg0).map{
+                            try String.fromEmacsVal(env, $0)}
+                    }
+                    else {
+                        throw EmacsError.wrong_type_argument(
+                          "First argument can be nil, a list or a string")
+                    }
+                }
+
+                try AuthorizeCalendar(env)
+                let calendars = try calendar_ids?.map{
+                    if let id=$0,
+                       let cal = eventStore.calendar(withIdentifier: id) {
+                        return cal
+                    }
+                    else {
+                        throw EmacsError.error("Unable to fetch one of the calendars.")
+                    }}
+
                 let start = try Date.fromEmacsVal(env, argStart)
                 let end = try Date.fromEmacsVal(env, argEnd)
 
                 if let start, let end {
-                    try AuthorizeCalendar(env)
-
-                    var calendarEventsPredicate : NSPredicate
-
-                    if calendar_id == nil {
-                        calendarEventsPredicate =
-                          eventStore.predicateForEvents(withStart: start,
-                                                        end: end,
-                                                        calendars: nil)
-                    }
-                    else {
-                        if let calendar = eventStore.calendar(withIdentifier:
-                                                                calendar_id!) {
-                            calendarEventsPredicate =
-                              eventStore.predicateForEvents(withStart: start,
-                                                            end: end,
-                                                            calendars: [calendar])
-                        }
-                        else {
-                            throw EmacsError.error("Cannot retrieve calendar.")
-                        }
-                    }
-
-                    let events = eventStore.events(matching: calendarEventsPredicate)
+                    let calendarEventsPredicate =
+                      eventStore.predicateForEvents(withStart: start,
+                                                    end: end,
+                                                    calendars: calendars)
+                    let events = eventStore.events(matching:
+                                                     calendarEventsPredicate)
                     let list : [EmacsCastable?] =
                       Array(events.map {return maccalfw_event_to_plist(env, $0)})
                     return list.toEmacsVal(env)
@@ -397,6 +409,8 @@ Each item in the list contains contains id, title, color and an editable predica
 Get a list of events in a calendar.
 Takes as arguments the CALENDAR-ID, START-TIME and END-TIME.
 The times are encoded times.
+If CALENDAR-ID is nil, return all events. CALENDAR-ID can also be a list of
+calendar IDs.
 """)
 
         emacs_defun(env, "maccalfw-update-event", 1, 1, maccalfw_update_event,
