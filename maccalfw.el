@@ -464,21 +464,37 @@ EVENT defaults to the event data."
         (setcar (nthcdr 2 event) 1))
     (mouse-drag-region event)))
 
-(defun maccalfw-event-new-event (start &optional end all-day)
+(defun maccalfw-event-new-event (event-data)
   "Create an events-details buffer for a new event.
-START and END default to the start and end times. If ALL-DAY is
-non-nil, default to an all-day event."
-  (interactive (if (and (derived-mode-p 'cfw:calendar-mode)
-                        ;; TODO: Check that the view is indeed a block
-                        ;; (cfw:component-view (cfw:cp-get-component))
-                        ;; should return a block view
-                        (fboundp 'calfw-blocks-region-to-time))
-                   (calfw-blocks-region-to-time)
-                 (list (current-time))))
-  (maccalfw-event-open
-   (list :start start
-         :end (or end (time-add start 3600))
-         :all-day-p all-day)))
+EVENT-DATA contains the initial event information."
+  (interactive
+   (list
+    (if (and (derived-mode-p 'cfw:calendar-mode)
+             ;; TODO: Check that the view is indeed a block
+             ;; (cfw:component-view (cfw:cp-get-component))
+             ;; should return a block view
+             (fboundp 'calfw-blocks-region-to-time))
+        (if-let ((event (and current-prefix-arg
+                             (get-text-property (point) 'cfw:event)))
+                 (old-event-data (cfw:event-data event)))
+            (cl-loop for (key val) on
+                     old-event-data by #'cddr
+                     if (member key '(:start :end :title
+                                             :all-day-p
+                                             :timezone
+                                             :location
+                                             :availability
+                                             :url
+                                             :notes))
+                     append (list key val))
+          (cl-destructuring-bind (start end all-day)
+              (calfw-blocks-region-to-time)
+            (list :start start
+                  :end (or end (time-add start 3600))
+                  :all-day-p all-day)))
+      (list :start (current-time)
+            :end (time-add (current-time) 3600)))))
+  (maccalfw-event-open event-data))
 
 (defun maccalfw-event-goto-details (event)
   "Open event details for the calfw EVENT."
@@ -753,7 +769,7 @@ function)."
      :format
      (concat
       (propertize " Location: " 'face 'maccalfw-event-field-names)
-      "%v\n\n")
+      "%v\n")
      (or (plist-get event :location) ""))
 
     (when-let (stat (plist-get event :status))
