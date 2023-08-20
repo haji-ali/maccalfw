@@ -67,32 +67,32 @@ Takes one argument which is the new event data."
   "Face used for field names."
   :version "28.1")
 
-(defvar-keymap maccalfw-event-mode-map
-  :doc "Keymap for `maccalfw-event'."
-  :full t
-  :parent widget-keymap
+(defvar-keymap maccalfw-event--custom-map
+  :doc "Keymap including custom bindings for `maccalfw-event'."
   "C-c C-k" #'maccalfw-event-kill
   "C-c C-s" #'maccalfw-event-date-field-pick
   "C-c C-w" #'maccalfw-event-save
-  "C-x C-s" #'maccalfw-event-save)
+  "C-x C-s" #'maccalfw-event-save
+  "S-<tab>" #'maccalfw-event-widget-backward
+  "TAB"     #'maccalfw-event-widget-forward)
+
+(defvar-keymap maccalfw-event-mode-map
+  :doc "Keymap for `maccalfw-event'."
+  :parent (make-composed-keymap
+           maccalfw-event--custom-map
+           widget-keymap))
 
 (defvar-keymap maccalfw-event-field-map
   :doc "Keymap for fields in `maccalfw-event'."
-  :full t
-  :parent widget-field-keymap
-  "C-c C-k" #'maccalfw-event-kill
-  "C-c C-s" #'maccalfw-event-date-field-pick
-  "C-c C-w" #'maccalfw-event-save
-  "C-x C-s" #'maccalfw-event-save)
+  :parent (make-composed-keymap
+           maccalfw-event--custom-map
+           widget-field-keymap))
 
 (defvar-keymap maccalfw-event-text-map
   :doc "Keymap for text fields in `maccalfw-event'."
-  :full t
-  :parent widget-text-keymap
-  "C-c C-k" #'maccalfw-event-kill
-  "C-c C-s" #'maccalfw-event-date-field-pick
-  "C-c C-w" #'maccalfw-event-save
-  "C-x C-s" #'maccalfw-event-save)
+  :parent (make-composed-keymap
+           maccalfw-event--custom-map
+           widget-text-keymap))
 
 (define-derived-mode maccalfw-event-mode fundamental-mode "Calendar Event"
   "Major mode for editing calendar events."
@@ -102,7 +102,6 @@ Takes one argument which is the new event data."
   (add-to-list 'kill-buffer-query-functions
                'maccalfw-event-save-maybe))
 
-(defvar-local maccalfw-event--widgets nil)
 (defvar maccalfw-event--timezones nil)
 (defvar maccalfw-event--default-timezone nil)
 
@@ -559,32 +558,107 @@ If DELETE is non-nil, delete the widget instead."
 If ACTIVE is t, activate widgets instead"
   ;; widget-specify-active
   ;; How to properly loop over a plist?
-  (cl-loop for (_ widget) on
-           maccalfw-event--widgets by #'cddr
-           do
-           (maccalfw-event--widget-overlay
-            widget :inactive active
-            'evaporate t
-            'priority 100
-            'modification-hooks '(maccalfw-event-read-only))))
+  (save-excursion
+    (goto-char (point-min))
+    (cl-loop for wid = (ignore-errors
+                         (maccalfw-event--widget-move 1 nil 0 t t)
+                         (widget-at))
+             while wid
+             if (widget-get wid :field-key)
+             do
+             (maccalfw-event--widget-overlay
+              widget :inactive active
+              'evaporate t
+              'priority 100
+              'modification-hooks '(maccalfw-event-read-only)))))
 
 (defun maccalfw-event--get-widget (key)
   "Return widget corresponding to KEY."
-  (plist-get maccalfw-event--widgets key)
-  ;; TODO: We can use `widget-forward' to get everything but it doesn't work
-  ;; with hidden .
-  )
+  (save-excursion
+    (goto-char (point-min))
+    (cl-loop
+     for wid = (ignore-errors
+                 (maccalfw-event--widget-move 1 nil 0 t t)
+                 (widget-at))
+     until (or (null wid)
+               (eq (widget-get wid :field-key) key))
+     finally return wid)))
+
+(defun maccalfw-event--widget-move
+    (arg &optional skip max-wrap suppress-echo suppress-hook)
+  "Move point to the ARG next field or button.
+ARG may be negative to move backward."
+  (unless max-wrap
+    (setq max-wrap 2))
+  (let ((old (widget-tabable-at)))
+    ;; Forward.
+    (while (> arg 0)
+      (cond ((eobp)
+             (if (> max-wrap 0)
+	         (progn (goto-char (point-min))
+	                (setq max-wrap (1- max-wrap)))
+               (error "No buttons or fields found")))
+	    (widget-use-overlay-change
+	     (goto-char (next-overlay-change (point))))
+	    (t
+	     (forward-char 1)))
+      (let ((new (widget-tabable-at)))
+	(when (and new
+                   (or (not skip)
+                       (not (or (widget-get new :hidden)
+                                (widget-get new :inactive)))))
+	  (unless (eq new old)
+	    (setq arg (1- arg))
+	    (setq old new)))))
+    ;; Backward.
+    (while (< arg 0)
+      (cond ((bobp)
+             (if (> max-wrap 0)
+	         (progn (goto-char (point-max))
+	                (setq max-wrap (1- max-wrap)))
+               (error "No buttons or fields found")))
+	    (widget-use-overlay-change
+	     (goto-char (previous-overlay-change (point))))
+	    (t
+	     (backward-char 1)))
+      (let ((new (widget-tabable-at)))
+	(when (and new
+                   (not (eq new old))
+                   (or (not skip)
+                       (not (or (widget-get new :hidden)
+                                (widget-get new :inactive)))))
+          (setq arg (1+ arg)))))
+
+    (let ((new (widget-tabable-at)))
+      (while (eq (widget-tabable-at) new)
+	(backward-char)))
+    (forward-char))
+  (unless suppress-echo
+    (widget-echo-help (point)))
+  (unless suppress-hook
+    (run-hooks 'widget-move-hook)))
+
+(defun maccalfw-event-widget-forward (arg)
+  "Move point to the next field or button.
+With optional ARG, move across that many fields.
+Skips any inactive or hidden widgent."
+  (interactive "p")
+  (run-hooks 'widget-forward-hook)
+  (maccalfw-event--widget-move arg t))
+
+(defun maccalfw-event-widget-backward (arg)
+  "Move point to the next field or button.
+With optional ARG, move across that many fields."
+  (interactive "p")
+  (run-hooks 'widget-backward-hook)
+  (maccalfw-event--widget-move (- arg) t))
 
 (defun maccalfw-event--create-wid (key &rest args)
   "Create widget and associate it to KEY.
 Passes ARGS to `widget-create'"
-  (setq
-   maccalfw-event--widgets
-   (plist-put maccalfw-event--widgets key (apply 'widget-create args)))
-  ;; (let ((wid (apply 'widget-create args)))
-  ;;   (widget-put wid :event-field key)
-  ;;   wid)
-  )
+  (let ((widget (apply 'widget-create args)))
+    (widget-put widget :field-key key)
+    widget))
 
 (defun maccalfw-event--format-time (time &optional timezone)
   "Convert TIME to new TIMEZONE and format it as a string.
@@ -702,7 +776,7 @@ function)."
      'start-date
      'editable-field
      :keymap maccalfw-event-field-map
-     :format "%v "
+     :format " %v "
      :size 10
      (and event
           (format-time-string "%F"
@@ -768,9 +842,6 @@ function)."
        :old-value timezone
        options))
 
-    (maccalfw-event--all-day-notify
-     (maccalfw-event--get-widget 'all-day))
-
     (maccalfw-event--create-wid
      'location
      'editable-field
@@ -820,6 +891,9 @@ function)."
      (or (plist-get event :notes) ""))
 
     (widget-setup)
+
+    (maccalfw-event--all-day-notify
+     (maccalfw-event--get-widget 'all-day))
     (goto-char (point-min))
     (widget-move 1) ;; Go to next widget (should be title)
     (widget-end-of-line) ;; Go to end of line
