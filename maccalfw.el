@@ -85,6 +85,15 @@ Takes one argument which is the new event data."
   "C-c C-w" #'maccalfw-event-save
   "C-x C-s" #'maccalfw-event-save)
 
+(defvar-keymap maccalfw-event-text-map
+  :doc "Keymap for text fields in `maccalfw-event'."
+  :full t
+  :parent widget-text-keymap
+  "C-c C-k" #'maccalfw-event-kill
+  "C-c C-s" #'maccalfw-event-date-field-pick
+  "C-c C-w" #'maccalfw-event-save
+  "C-x C-s" #'maccalfw-event-save)
+
 (define-derived-mode maccalfw-event-mode fundamental-mode "Calendar Event"
   "Major mode for editing calendar events."
   :lighter " Calfw event"
@@ -657,7 +666,7 @@ function)."
      :event-data event
      :keymap maccalfw-event-field-map
      :value-face 'maccalfw-event-title-field
-     :format " %v \n" ; Text after the field!
+     :format "%v \n" ; Text after the field!
      (or (plist-get event :title) ""))
 
     (let* ((cals (maccalfw-get-calendars))
@@ -675,7 +684,7 @@ function)."
        'calendar-id
        'menu-choice
        :tag "Calendar"
-       :format " %[%t%]: %v\n\n"
+       :format "%[%t%]: %v\n\n"
        :value (or (plist-get event :calendar-id)
                   (plist-get
                    (cl-find-if
@@ -693,7 +702,7 @@ function)."
      'start-date
      'editable-field
      :keymap maccalfw-event-field-map
-     :format " %v "
+     :format "%v "
      :size 10
      (and event
           (format-time-string "%F"
@@ -754,7 +763,7 @@ function)."
        'menu-choice
        :notify #'maccalfw-event--timezone-widget-notify
        :tag "Timezone"
-       :format " %[%t%]: %v\n\n"
+       :format "%[%t%]: %v\n\n"
        :value timezone
        :old-value timezone
        options))
@@ -768,18 +777,18 @@ function)."
      :keymap maccalfw-event-field-map
      :format
      (concat
-      (propertize " Location: " 'face 'maccalfw-event-field-names)
+      (propertize "Location: " 'face 'maccalfw-event-field-names)
       "%v\n")
      (or (plist-get event :location) ""))
 
     (when-let (stat (plist-get event :status))
       (widget-insert
-       (propertize " Status: " 'face 'maccalfw-event-field-names)
+       (propertize "Status: " 'face 'maccalfw-event-field-names)
        (symbol-name stat) "\n\n"))
 
     (when-let (org (plist-get event :organizer))
       (widget-insert
-       (propertize " Organizer: " 'face 'maccalfw-event-field-names)
+       (propertize "Organizer: " 'face 'maccalfw-event-field-names)
        org "\n\n"))
 
     (maccalfw-event--create-wid
@@ -787,7 +796,7 @@ function)."
      'radio-button-choice
      :entry-format "  %b %v "
      :inline t
-     :format " %v\n\n"
+     :format "%v\n\n"
      :value (or (plist-get event :availability) 'busy)
      '(item :format "%[Tentative%] " :value tentative)
      '(item :format "%[Free%] " :value free)
@@ -799,14 +808,14 @@ function)."
      :keymap maccalfw-event-field-map
      :format
      (concat
-      (propertize " URL: " 'face 'maccalfw-event-field-names)
+      (propertize "URL: " 'face 'maccalfw-event-field-names)
       "%v\n\n")
      (or (plist-get event :url) ""))
 
     (maccalfw-event--create-wid
      'notes 'text
      :format "%v" ; Text after the field!
-     :keymap maccalfw-event-field-map
+     :keymap maccalfw-event-text-map
      :value-face 'maccalfw-event-notes-field
      (or (plist-get event :notes) ""))
 
