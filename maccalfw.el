@@ -567,7 +567,7 @@ If ACTIVE is t, activate widgets instead"
              if (widget-get wid :field-key)
              do
              (maccalfw-event--widget-overlay
-              widget :inactive active
+              wid :inactive active
               'evaporate t
               'priority 100
               'modification-hooks '(maccalfw-event-read-only)))))
