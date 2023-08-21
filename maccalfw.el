@@ -72,9 +72,7 @@ Takes one argument which is the new event data."
   "C-c C-k" #'maccalfw-event-kill
   "C-c C-s" #'maccalfw-event-date-field-pick
   "C-c C-w" #'maccalfw-event-save
-  "C-x C-s" #'maccalfw-event-save
-  "S-<tab>" #'maccalfw-event-widget-backward
-  "TAB"     #'maccalfw-event-widget-forward)
+  "C-x C-s" #'maccalfw-event-save)
 
 (defvar-keymap maccalfw-event-mode-map
   :doc "Keymap for `maccalfw-event'."
@@ -287,34 +285,34 @@ Warn if the buffer is modified and offer to save."
 (defun maccalfw-event-save ()
   "Save event."
   (interactive)
-  (let* ((title-wid (maccalfw-event--get-widget 'title))
+  (let* ((widgets (maccalfw-event--get-widgets))
+         (title-wid (alist-get 'title widgets))
          (old-data (widget-get title-wid :event-data))
-         (tz (widget-value (maccalfw-event--get-widget 'timezone)))
-         (all-day (widget-value (maccalfw-event--get-widget 'all-day)))
+         (tz (widget-value (alist-get 'timezone widgets)))
+         (all-day (widget-value (alist-get 'all-day widgets)))
          (start (maccalfw-event--parse-datetime
                  (if all-day
                      "00:00"
-                   (widget-value (maccalfw-event--get-widget 'start-time)))
-                 (widget-value (maccalfw-event--get-widget 'start-date))
+                   (widget-value (alist-get 'start-time widgets)))
+                 (widget-value (alist-get 'start-date widgets))
                  tz))
          (end (maccalfw-event--parse-datetime
                (if all-day
                    "23:59:59"
-                 (widget-value (maccalfw-event--get-widget 'end-time)))
-               (widget-value (maccalfw-event--get-widget 'end-date))
+                 (widget-value (alist-get 'end-time widgets)))
+               (widget-value (alist-get 'end-date widgets))
                tz))
          (new-data
           (list
            :id (plist-get old-data :id)
-           :calendar-id (widget-value (maccalfw-event--get-widget 'calendar-id))
+           :calendar-id (widget-value (alist-get 'calendar-id widgets))
            :title (widget-value title-wid)
            :timezone (if all-day "" tz)
            :all-day-p all-day
-           :url (widget-value (maccalfw-event--get-widget 'url))
-           :location (widget-value (maccalfw-event--get-widget 'location))
-           :availability (widget-value (maccalfw-event--get-widget
-                                        'availability))
-           :notes (widget-value (maccalfw-event--get-widget 'notes))))
+           :url (widget-value (alist-get 'url widgets))
+           :location (widget-value (alist-get 'location widgets))
+           :availability (widget-value (alist-get 'availability widgets))
+           :notes (widget-value (alist-get 'notes widgets))))
          (new-event (null (plist-get old-data :id))))
     (if (plist-get old-data :read-only)
         (user-error "Event is not editable.?"))
@@ -378,18 +376,18 @@ Sets both start and end dates/times, preserving the duration.
 If FOR-END-DATE is non-nil, set the end-date only."
   (interactive (list
                 (or current-prefix-arg
-                    (eq (widget-at (point))
-                        (maccalfw-event--get-widget 'end-time))
-                    (eq (widget-at (point))
-                        (maccalfw-event--get-widget 'end-date)))))
+                    (when-let ((wid (widget-at (point)))
+                               (key (widget-get wid :field-key)))
+                      (member key '(end-time end-date))))))
 
-  (if (widget-get (maccalfw-event--get-widget 'start-time) :inactive)
+  (let ((widgets (maccalfw-event--get-widgets)))
+    (if (widget-get (alist-get 'start-time widgets) :inactive)
       (maccalfw-event-read-only)
-    (let* ((start-time-wid (maccalfw-event--get-widget 'start-time))
-           (start-date-wid (maccalfw-event--get-widget 'start-date))
-           (end-time-wid (maccalfw-event--get-widget 'end-time))
-           (end-date-wid (maccalfw-event--get-widget 'end-date))
-           (all-day-wid (maccalfw-event--get-widget 'all-day))
+      (let* ((start-time-wid (alist-get 'start-time widgets))
+             (start-date-wid (alist-get 'start-date widgets))
+             (end-time-wid (alist-get 'end-time widgets))
+             (end-date-wid (alist-get 'end-date widgets))
+             (all-day-wid (alist-get 'all-day widgets))
            (all-day-p  (widget-value all-day-wid))
            (start-time
             (maccalfw-event--parse-datetime
@@ -444,7 +442,7 @@ If FOR-END-DATE is non-nil, set the end-date only."
                                                                 start-time))))))
             ;; for-end-date and range not given
             (widget-value-set end-time-wid
-                              (maccalfw-event--format-time new-time))))))))
+                                (maccalfw-event--format-time new-time)))))))))
 
 (defun maccalfw-event-open (event)
   "Open a buffer to display the details of EVENT."
@@ -551,7 +549,9 @@ If DELETE is non-nil, delete the widget instead."
    :hidden visible
    'evaporate t
    'priority 101
-   'invisible (not visible)))
+   'invisible (not visible))
+  (widget-put widget
+              :tab-order (if visible 1 -1)))
 
 (defun maccalfw-event--make-inactive (&optional active)
   "Make all widgets in the current buffer inactive.
@@ -559,12 +559,7 @@ If ACTIVE is t, activate widgets instead"
   ;; widget-specify-active
   ;; How to properly loop over a plist?
   (save-excursion
-    (goto-char (point-min))
-    (cl-loop for wid = (ignore-errors
-                         (maccalfw-event--widget-move 1 nil 0 t t)
-                         (widget-at))
-             while wid
-             if (widget-get wid :field-key)
+    (cl-loop for (key . wid) in (maccalfw-event--get-widgets 'all)
              do
              (maccalfw-event--widget-overlay
               wid :inactive active
@@ -572,86 +567,38 @@ If ACTIVE is t, activate widgets instead"
               'priority 100
               'modification-hooks '(maccalfw-event-read-only)))))
 
-(defun maccalfw-event--get-widget (key)
-  "Return widget corresponding to KEY."
+(defun maccalfw-event--get-widgets (&optional all)
+  "Return all widget in the current form."
   (save-excursion
     (goto-char (point-min))
     (cl-loop
-     for wid = (ignore-errors
-                 (maccalfw-event--widget-move 1 nil 0 t t)
-                 (widget-at))
-     until (or (null wid)
-               (eq (widget-get wid :field-key) key))
-     finally return wid)))
+     for wid = (maccalfw-event--next-widget)
+     until (null wid)
+     append
+     (cl-loop
+      for parent = wid then (widget-get parent :parent)
+      until (null parent)
+      for key = (widget-get parent :field-key)
+      if key
+      collect (cons key parent)))))
 
-(defun maccalfw-event--widget-move
-    (arg &optional skip max-wrap suppress-echo suppress-hook)
-  "Move point to the ARG next field or button.
-ARG may be negative to move backward."
-  (unless max-wrap
-    (setq max-wrap 2))
-  (let ((old (widget-tabable-at)))
-    ;; Forward.
-    (while (> arg 0)
-      (cond ((eobp)
-             (if (> max-wrap 0)
-	         (progn (goto-char (point-min))
-	                (setq max-wrap (1- max-wrap)))
-               (error "No buttons or fields found")))
+(defun maccalfw-event--next-widget ()
+  "Move point to the next field or button."
+  (let ((old (widget-at))
+        next done)
+    (while (not done)
+      (cond
+       ((eobp) (setq done t))
 	    (widget-use-overlay-change
 	     (goto-char (next-overlay-change (point))))
 	    (t
 	     (forward-char 1)))
-      (let ((new (widget-tabable-at)))
-	(when (and new
-                   (or (not skip)
-                       (not (or (widget-get new :hidden)
-                                (widget-get new :inactive)))))
+      (let ((new (widget-at)))
+	(when new
 	  (unless (eq new old)
-	    (setq arg (1- arg))
-	    (setq old new)))))
-    ;; Backward.
-    (while (< arg 0)
-      (cond ((bobp)
-             (if (> max-wrap 0)
-	         (progn (goto-char (point-max))
-	                (setq max-wrap (1- max-wrap)))
-               (error "No buttons or fields found")))
-	    (widget-use-overlay-change
-	     (goto-char (previous-overlay-change (point))))
-	    (t
-	     (backward-char 1)))
-      (let ((new (widget-tabable-at)))
-	(when (and new
-                   (not (eq new old))
-                   (or (not skip)
-                       (not (or (widget-get new :hidden)
-                                (widget-get new :inactive)))))
-          (setq arg (1+ arg)))))
-
-    (let ((new (widget-tabable-at)))
-      (while (eq (widget-tabable-at) new)
-	(backward-char)))
-    (forward-char))
-  (unless suppress-echo
-    (widget-echo-help (point)))
-  (unless suppress-hook
-    (run-hooks 'widget-move-hook)))
-
-(defun maccalfw-event-widget-forward (arg)
-  "Move point to the next field or button.
-With optional ARG, move across that many fields.
-Skips any inactive or hidden widgent."
-  (interactive "p")
-  (run-hooks 'widget-forward-hook)
-  (maccalfw-event--widget-move arg t))
-
-(defun maccalfw-event-widget-backward (arg)
-  "Move point to the next field or button.
-With optional ARG, move across that many fields."
-  (interactive "p")
-  (run-hooks 'widget-backward-hook)
-  (maccalfw-event--widget-move (- arg) t))
+	    (setq next new
+                  done t)))))
+    next))
 
 (defun maccalfw-event--create-wid (key &rest args)
   "Create widget and associate it to KEY.
@@ -698,14 +645,15 @@ TIMEZONE."
 Assumes that WIDGET has an additional attributes `:old-value'
 which is the old value of the timezone (will be updated in this
 function)."
-  (unless (widget-value (maccalfw-event--get-widget 'all-day))
+  (let ((widgets (maccalfw-event--get-widgets)))
+    (unless (widget-value (alist-get 'all-day widgets))
   (let* ((old-tz (widget-get widget :old-value))
          (tz (widget-value widget)))
     (save-excursion
       (cl-loop for (date-wid . time-wid) in '((start-date . start-time)
                                               (end-date . end-time))
-               for time-widget = (maccalfw-event--get-widget time-wid)
-               for date-widget = (maccalfw-event--get-widget date-wid)
+                   for time-widget = (alist-get time-wid widgets)
+                   for date-widget = (alist-get date-wid widgets)
                do
                (widget-value-set
                 time-widget
@@ -715,17 +663,18 @@ function)."
                   (widget-value date-widget)
                   old-tz)
                  tz)))
-        (widget-put widget :old-value tz)))))
+          (widget-put widget :old-value tz))))))
 
 (defun maccalfw-event--all-day-notify (widget &rest _)
   "Action for all-day WIDGET."
-  (let ((checked (widget-value widget)))
+  (let ((checked (widget-value widget))
+        (widgets (maccalfw-event--get-widgets)))
     (maccalfw-event--show-hide-widget
-     (maccalfw-event--get-widget 'end-date)
+     (alist-get 'end-date widgets)
      checked)
     (mapc
      (lambda (x)
-       (when-let (field (maccalfw-event--get-widget x))
+       (when-let (field (alist-get x widgets))
          (maccalfw-event--show-hide-widget field (not checked))))
      '(start-time end-time timezone))))
 
@@ -873,6 +822,7 @@ function)."
      '(item :format "%[Free%] " :value free)
      '(item :format "%[Busy%] " :value busy)
      '(item :format "%[Unavailable%] " :value unavailable))
+
     (maccalfw-event--create-wid
      'url
      'editable-field
@@ -892,8 +842,13 @@ function)."
 
     (widget-setup)
 
-    (maccalfw-event--all-day-notify
-     (maccalfw-event--get-widget 'all-day))
+    (let ((widgets (maccalfw-event--get-widgets)))
+      (maccalfw-event--all-day-notify (alist-get 'all-day widgets))
+      (cl-loop
+       for child in (widget-get (alist-get 'availability widgets) :children)
+       do
+       (widget-put child :tab-order -1)))
+
     (goto-char (point-min))
     (widget-move 1) ;; Go to next widget (should be title)
     (widget-end-of-line) ;; Go to end of line
