@@ -215,72 +215,78 @@ private func maccalfw_update_event(
                 try AuthorizeCalendar(env)
 
                 let eventData = try emacs_parse_plist(env, arg0)
-        let eventId =
+                let eventId =
                   try eventData["id"].map { try String.fromEmacsVal(env, $0) }
-        var event : EKEvent
+                var event : EKEvent
 
-        if let eventId, let eventId {
-            let old_event = eventStore.event(withIdentifier: eventId)
-            if let old_event {
-                event = old_event
-            }
-            else{
-                throw EmacsError.error("Cannot retrieve event")
-            }
-        }
-        else{
-            let calendar_id =
-              try eventData["calendar-id"].map { try String.fromEmacsVal(env, $0) }
-            event = EKEvent(eventStore: eventStore)
-            if let calendar_id, let calendar_id,
-               let calendar = eventStore.calendar(withIdentifier: calendar_id) {
-                event.calendar = calendar
-            }
-            else {
-                throw EmacsError.error("Cannot retrieve calendar")
-            }
-        }
+                if let eventId, let eventId {
+                    let old_event = eventStore.event(withIdentifier: eventId)
+                    if let old_event {
+                        event = old_event
+                    }
+                    else{
+                        throw EmacsError.error("Cannot retrieve event")
+                    }
+                }
+                else {
+                    event = EKEvent(eventStore: eventStore)
+                }
 
-        if let tmp = eventData["title"] {
-            event.title = try String.fromEmacsVal(env, tmp)
-        }
-        if let tmp = eventData["start"] {
-            event.startDate = try Date.fromEmacsVal(env, tmp)
-        }
-        if let tmp = eventData["end"] {
-            event.endDate = try Date.fromEmacsVal(env, tmp)
-        }
-        if let tmp = eventData["location"] {
+                if let tmp = eventData["calendar-id"] {
+                    let calendar_id = try String.fromEmacsVal(env, tmp)
+                    if let calendar_id,
+                       let calendar = eventStore.calendar(withIdentifier: calendar_id) {
+                        event.calendar = calendar
+                    }
+                    else {
+                        throw EmacsError.error("Cannot retrieve calendar")
+                    }
+                }
+
+                if let tmp = eventData["title"] {
+                    event.title = try String.fromEmacsVal(env, tmp)
+                }
+                if let tmp = eventData["start"] {
+                    event.startDate = try Date.fromEmacsVal(env, tmp)
+                }
+                if let tmp = eventData["end"] {
+                    event.endDate = try Date.fromEmacsVal(env, tmp)
+                }
+                if let tmp = eventData["location"] {
                     let str = try String.fromEmacsVal(env, tmp)
                     event.location = (str?.isEmpty ?? true) ? nil : str
-        }
-        if let tmp = eventData["notes"] {
-            event.notes = try String.fromEmacsVal(env, tmp)
-        }
-        if let tmp = eventData["url"] {
+                }
+                if let tmp = eventData["notes"] {
+                    event.notes = try String.fromEmacsVal(env, tmp)
+                }
+                if let tmp = eventData["url"] {
                     let str = try String.fromEmacsVal(env, tmp)
-                    event.url = (str?.isEmpty ?? true) ? nil : URL(string: str!)
-        }
-        if let tmp = eventData["timezone"] {
+                    event.url = ((str?.isEmpty ?? true) ? nil
+                                   : URL(string: str!))
+                }
+                if let tmp = eventData["timezone"] {
                     let str = try String.fromEmacsVal(env, tmp)
-                    event.timeZone = (str?.isEmpty ?? true) ? nil : TimeZone(identifier: str!)
-        }
+                    event.timeZone = ((str?.isEmpty ?? true) ? nil
+                                        : TimeZone(identifier: str!))
+                }
 
-        if let tmp = eventData["all-day-p"] {
-            event.isAllDay = env.pointee.is_not_nil(env, tmp)
-        }
-        if let tmp = eventData["availability"] {
-                    event.availability = try EKEventAvailability.parse(try emacs_symbol_to_string(env, tmp)!)
-        }
+                if let tmp = eventData["all-day-p"] {
+                    event.isAllDay = env.pointee.is_not_nil(env, tmp)
+                }
+                if let tmp = eventData["availability"] {
+                    event.availability = try EKEventAvailability.parse(
+                      try emacs_symbol_to_string(env, tmp)!)
+                }
 
-        // Read-only: occurrenceDate, organizer, last_modified, created_date
-        // detached-p, status
+                // Read-only: occurrenceDate, organizer, last_modified, created_date
+                // detached-p, status
 
-        do {
-            try eventStore.save(event, span: .thisEvent)
-            return maccalfw_event_to_plist(env, event)
-        } catch {
-                    throw EmacsError.error("Failed to save event with error: \(error.localizedDescription)")
+                do {
+                    try eventStore.save(event, span: .thisEvent)
+                    return maccalfw_event_to_plist(env, event)
+                } catch {
+                    throw EmacsError.error("Failed to save event with error: \
+\(error.localizedDescription)")
                 }
             }
         }

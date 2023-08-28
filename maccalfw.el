@@ -329,16 +329,20 @@ Warn if the buffer is modified and offer to save."
     (setq new-data
           (cl-loop for (key val) on new-data by #'cddr
                    for old-val = (plist-get old-data key)
-                   when (or (and (not new-event) (not (equal val old-val)))
-                            (and (or new-event (null old-val))
-                                 (not (equal val ""))))
+                   when (or
+                         (and new-event (not (string= val "")) val)
+                         (and (not new-event)
+                              (or
+                               (and (string-empty-p val) old-val)
+                               (and (not (string-empty-p val))
+                                    (not (equal val old-val))))))
                    append (list key val)))
     (unless (and (not new-event)
                  (time-equal-p start (plist-get old-data :start)))
       (setq new-data (plist-put new-data :start start)))
     (unless (and (not new-event)
                  (time-equal-p end (plist-get old-data :end)))
-                 (setq new-data
+      (setq new-data
             (plist-put new-data :end end)))
     (when (and new-data (plist-get old-data :id))
       (setq new-data
@@ -350,8 +354,8 @@ Warn if the buffer is modified and offer to save."
                            (maccalfw-update-event new-data))
                (when (called-interactively-p 'interactive)
                  (message "Event saved."))
-                 (run-hook-with-args
-                  'maccalfw-event-save-hook
+               (run-hook-with-args
+                'maccalfw-event-save-hook
                 (widget-get title-wid :event-data)))
       (when (called-interactively-p 'interactive)
         (message "(No changes to event to be saved)")))
