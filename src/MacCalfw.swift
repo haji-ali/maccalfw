@@ -285,8 +285,7 @@ private func maccalfw_update_event(
                     try eventStore.save(event, span: .thisEvent)
                     return maccalfw_event_to_plist(env, event)
                 } catch {
-                    throw EmacsError.error("Failed to save event with error: \
-\(error.localizedDescription)")
+                    throw EmacsError.error("Failed to save event with error: \(error.localizedDescription)")
                 }
             }
         }
