@@ -6,11 +6,94 @@ let eventStore = EKEventStore()
 var Qt : emacs_value?
 var Qnil : emacs_value?
 
-typealias EmacsDefunCallback  = (@convention(c)
-                                 (UnsafeMutablePointer<emacs_env>?,
-                                  Int,
-                                  UnsafeMutablePointer<emacs_value?>?,
-                                                       UnsafeMutableRawPointer?) -> emacs_value?)?
+extension NSNumber  : EmacsCastable {
+    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+        return env.pointee.make_integer(env, self.intValue)
+    }
+}
+
+extension EKEventAvailability : EmacsCastable  {
+    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+        switch self {
+        case .tentative:
+            return env.pointee.intern(env, "tentative")
+        case .free:
+            return env.pointee.intern(env, "free")
+        case .busy:
+            return env.pointee.intern(env, "busy")
+        case .unavailable:
+            return env.pointee.intern(env, "unavailable")
+        case .notSupported:
+            fallthrough
+        @unknown default:
+            return nil
+        }
+    }
+    static func parse(_ val: String )  throws -> EKEventAvailability {
+        switch val {
+        case "notSupported":
+            return .notSupported
+        case "busy":
+            return .busy
+        case "free":
+            return .free
+        case "tentative":
+            return .tentative
+        case "unavailable":
+            return .unavailable
+        default:
+            throw EmacsError.wrong_type_argument("Unrecognised availability")
+        }
+    }
+}
+
+extension EKRecurrenceFrequency : EmacsCastable  {
+    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+        switch self {
+        case .daily:
+            return env.pointee.intern(env, "daily")
+        case .weekly:
+            return env.pointee.intern(env, "weekly")
+        case .monthly:
+            return env.pointee.intern(env, "monthly")
+        case .yearly:
+            return env.pointee.intern(env, "yearly")
+        @unknown default:
+            return nil
+        }
+    }
+    static func parse(_ val: String )  throws -> EKRecurrenceFrequency {
+        switch val {
+        case "daily":
+            return .daily
+        case "weekly":
+            return .weekly
+        case "monthly":
+            return .monthly
+        case "yearly":
+            return .yearly
+        default:
+            throw EmacsError.wrong_type_argument("Unrecognised availability")
+        }
+    }
+}
+
+extension EKEventStatus : EmacsCastable  {
+    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+        switch self {
+        case .confirmed:
+            return env.pointee.intern(env, "confirmed")
+        case .tentative:
+            return env.pointee.intern(env, "tentative")
+        case .canceled:
+            return env.pointee.intern(env, "cancelled")
+        case .none:
+            fallthrough
+        @unknown default:
+            return nil
+        }
+    }
+}
 
 func AuthorizeCalendar(_ env: UnsafeMutablePointer<emacs_env>) throws {
     switch EKEventStore.authorizationStatus(for: .event) {
@@ -34,75 +117,135 @@ func AuthorizeCalendar(_ env: UnsafeMutablePointer<emacs_env>) throws {
     }
 }
 
+extension EKEvent : EmacsCastable {
+    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+        let event_plist : [String : EmacsCastable?] =
+          [":id" : self.eventIdentifier,
+           ":calendar-id" : self.calendar.calendarIdentifier,
+           ":title" :self.title,
+           ":location" : self.location,
+           ":notes" : self.hasNotes ? self.notes : nil,
+           ":start" : self.startDate,
+           ":end" : self.endDate,
+           ":occurrence-date" : self.occurrenceDate,
+           ":detached-p" : self.isDetached ? Qt : nil,
+           ":all-day-p" : self.isAllDay ? Qt : nil,
+           ":created-date" : self.creationDate,
+           ":last-modified" : self.lastModifiedDate,
+           ":timezone" : self.timeZone?.identifier,
+           ":status" : self.status,
+           ":availability" : self.availability,
+           ":organizer" : self.organizer?.name,
+           ":recurrence" : self.hasRecurrenceRules ?
+             (self.recurrenceRules as [EmacsCastable?]?) : nil,
+           ":read-only" : ((self.organizer?.isCurrentUser ?? true) &&
+                             self.calendar.allowsContentModifications) ? nil : Qt,
+           ":url" : self.url?.absoluteString]
+
+        let quoted_plist =
+          Dictionary(uniqueKeysWithValues:
+                       event_plist.map {
+                           (env.pointee.intern(env, $0.key), $0.value) })
+
+        return quoted_plist.filter{$0.value != nil }.toEmacsVal(env)
+    }
+}
+
+extension EKRecurrenceDayOfWeek : EmacsCastable {
+    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+        let plist : [String : EmacsCastable?] =
+          [":week-day" : self.dayOfTheWeek.rawValue,
+           ":week-number" : self.weekNumber]
+
+        let quoted_plist =
+          Dictionary(uniqueKeysWithValues:
+                       plist.map {
+                           (env.pointee.intern(env, $0.key), $0.value) })
+
+        return quoted_plist.filter{$0.value != nil }.toEmacsVal(env)
+    }
+}
+
+extension EKRecurrenceRule : EmacsCastable {
+    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+        let plist : [String : EmacsCastable?] =
+          [":end-date" : self.recurrenceEnd?.endDate as EmacsCastable?,
+           ":occurrence-count" : self.recurrenceEnd?.occurrenceCount,
+           ":calendar-id": self.calendarIdentifier,
+           ":interval": self.interval,
+           ":frequency": self.frequency,
+           ":week-first-day": self.firstDayOfTheWeek,
+           ":week-days": self.daysOfTheWeek as [EmacsCastable?]?,
+           ":month-days": self.daysOfTheMonth as [EmacsCastable?]?,
+           ":year-days": self.daysOfTheYear as [EmacsCastable?]?,
+           ":year-weeks": self.weeksOfTheYear as [EmacsCastable?]?,
+           ":year-months": self.monthsOfTheYear as [EmacsCastable?]?,
+           ":set-positions": self.setPositions as [EmacsCastable?]?
+          ]
+
+        let quoted_plist =
+          Dictionary(uniqueKeysWithValues:
+                       plist.map {
+                           (env.pointee.intern(env, $0.key), $0.value) })
+
+        return quoted_plist.filter{$0.value != nil }.toEmacsVal(env)
+    }
+}
+
+private func getEKEvent(_ event_id : String,
+                        _ start: Date?) -> EKEvent? {
+    let event_data = eventStore.event(withIdentifier: event_id)
+    if let event_data, let start {
+        if (event_data.startDate != start) {
+            let delta : TimeInterval = 60*60
+            let calendarEventsPredicate =
+              eventStore.predicateForEvents(withStart: start-delta/2,
+                                            end: start+delta/2,
+                                            calendars: nil)
+            let events = eventStore.events(matching: calendarEventsPredicate)
+            // Find event with the same id and start date
+            return events.first(
+              where: { $0.eventIdentifier == event_id && $0.startDate == start})
+        }
+    }
+    return event_data
+}
+
 private func maccalfw_get_calendars(_ env: UnsafeMutablePointer<emacs_env>?,
                           _ nargs: Int,
                           _ args: UnsafeMutablePointer<emacs_value?>?,
-                          _ data: UnsafeMutableRawPointer?) -> emacs_value?
-{
+                          _ data: UnsafeMutableRawPointer?) -> emacs_value? {
     if let env {
         do {
             try AuthorizeCalendar(env)
 
-        let calendars = eventStore.calendars(for: .event)
-        let Qid = env.pointee.intern(env, ":id")
-        let Qtitle = env.pointee.intern(env, ":title")
-        let Qcolor = env.pointee.intern(env, ":color")
-        let Qeditable = env.pointee.intern(env, ":editable")
-        let Qdefault = env.pointee.intern(env, ":default")
-        let defaultCal = eventStore.defaultCalendarForNewEvents?.calendarIdentifier
-        let list : [EmacsCastable?] =
-          Array(calendars.map
-                {
-                    var calendar_data : [emacs_value? : EmacsCastable?] =
-                      [Qid : $0.calendarIdentifier,
-                       Qtitle: $0.title,
-                       Qcolor : $0.color.hexString,
-                                           Qeditable :
-                                             ($0.allowsContentModifications ? Qt : nil)]
-                    if ($0.calendarIdentifier == defaultCal){
-                        calendar_data[Qdefault] = Qt
-                    }
-                    return calendar_data.toEmacsVal(env)
-                })
-        return list.toEmacsVal(env)
-    }
+            let calendars = eventStore.calendars(for: .event)
+            let Qid = env.pointee.intern(env, ":id")
+            let Qtitle = env.pointee.intern(env, ":title")
+            let Qcolor = env.pointee.intern(env, ":color")
+            let Qeditable = env.pointee.intern(env, ":editable")
+            let Qdefault = env.pointee.intern(env, ":default")
+            let defaultCal = eventStore.defaultCalendarForNewEvents?.calendarIdentifier
+            let list : [EmacsCastable?] =
+              calendars.map {
+                  var calendar_data : [emacs_value? : EmacsCastable?] =
+                    [Qid : $0.calendarIdentifier,
+                     Qtitle: $0.title,
+                     Qcolor : $0.color.hexString,
+                     Qeditable :
+                       ($0.allowsContentModifications ? Qt : nil)]
+                  if ($0.calendarIdentifier == defaultCal){
+                      calendar_data[Qdefault] = Qt
+                  }
+                  return calendar_data
+              }
+            return list.toEmacsVal(env)
+        }
         catch {
             emacs_process_error(env, error)
         }
     }
     return Qnil
-}
-
-private func maccalfw_event_to_plist(_ env: UnsafeMutablePointer<emacs_env>,
-                                     _ event_data : EKEvent) -> emacs_value?
-{
-    let event_plist : [String : EmacsCastable?] =
-      [":id" : event_data.eventIdentifier,
-       ":calendar-id" : event_data.calendar.calendarIdentifier,
-       ":title" :event_data.title,
-       ":location" : event_data.location,
-       ":notes" : event_data.hasNotes ? event_data.notes : nil,
-       ":start" : event_data.startDate,
-       ":end" : event_data.endDate,
-       ":occurrence-date" : event_data.occurrenceDate,
-       ":detached-p" : event_data.isDetached ? Qt : nil,
-       ":all-day-p" : event_data.isAllDay ? Qt : nil,
-       ":created-date" : event_data.creationDate,
-       ":last-modified" : event_data.lastModifiedDate,
-       ":timezone" : event_data.timeZone?.identifier,
-       ":status" : event_data.status.toEmacsVal(env),
-       ":availability" : event_data.availability.toEmacsVal(env),
-       ":organizer" : event_data.organizer?.name,
-       ":read-only" : ((event_data.organizer?.isCurrentUser ?? true) &&
-                         event_data.calendar.allowsContentModifications) ? nil : Qt,
-       ":url" : event_data.url?.absoluteString]
-
-    let quoted_plist =
-      Dictionary(uniqueKeysWithValues:
-                   event_plist.map {
-                       (env.pointee.intern(env, $0.key), $0.value) })
-
-    return quoted_plist.filter{$0.value != nil }.toEmacsVal(env)
 }
 
 private func maccalfw_fetch_events(
@@ -157,9 +300,7 @@ private func maccalfw_fetch_events(
                                                     calendars: calendars)
                     let events = eventStore.events(matching:
                                                      calendarEventsPredicate)
-                    let list : [EmacsCastable?] =
-                      Array(events.map {return maccalfw_event_to_plist(env, $0)})
-                    return list.toEmacsVal(env)
+                    return (events as [EmacsCastable?]).toEmacsVal(env)
                 }
                 else {
                     throw EmacsError.wrong_type_argument("Wrong type for wrong arguments")
@@ -184,12 +325,11 @@ private func maccalfw_get_event(
 {
     if let env {
         do {
+            try AuthorizeCalendar(env)
             if let args, let eventId = try String.fromEmacsVal(env, args[0]) {
-                try AuthorizeCalendar(env)
-
-                let event_data = eventStore.event(withIdentifier: eventId)
-                if let event_data{
-                    return maccalfw_event_to_plist(env, event_data)
+                let start = nargs > 1 ? try Date.fromEmacsVal(env, args[1]) : nil
+                if let event_data = getEKEvent(eventId, start){
+                    return event_data.toEmacsVal(env)
                 }
                 else {
                     throw EmacsError.error("Failed to fetch event.")
@@ -283,7 +423,7 @@ private func maccalfw_update_event(
 
                 do {
                     try eventStore.save(event, span: .thisEvent)
-                    return maccalfw_event_to_plist(env, event)
+                    return event.toEmacsVal(env)
                 } catch {
                     throw EmacsError.error("Failed to save event with error: \(error.localizedDescription)")
                 }
@@ -306,7 +446,9 @@ private func maccalfw_remove_event(
         do {
             try AuthorizeCalendar(env)
             if let arg0 = args[0], let eventId = try String.fromEmacsVal(env, arg0) {
-                if let event = eventStore.event(withIdentifier: eventId) {
+                let start = nargs > 1 ? try Date.fromEmacsVal(env, args[1]) : nil
+
+                if let event = getEKEvent(eventId, start) {
                     do {
                         try eventStore.remove(event, span: .thisEvent)
                         return Qt
@@ -352,39 +494,11 @@ private func maccalfw_timezones(
                 if defTimeZone.identifier == $0 {
                     timezone_data[Qdefault] = Qt
                 }
-                return emacs_cons(env, $0.toEmacsVal(env), timezone_data.toEmacsVal(env))
+                return emacs_cons(env, $0.toEmacsVal(env),
+                                  timezone_data.toEmacsVal(env))
             }
             return emacs_cons(env, $0.toEmacsVal(env), Qnil)
         }.toEmacsVal(env)
-    }
-    return Qnil
-}
-
-private func maccalfw_test(
-  _ env: UnsafeMutablePointer<emacs_env>?,
-  _ nargs: Int,
-  _ args: UnsafeMutablePointer<emacs_value?>?,
-  _ data: UnsafeMutableRawPointer?) -> emacs_value?
-{
-    if let env {
-        do {
-            if let args, let arg0 = args[0] {
-                let eventData = try emacs_parse_plist(env, arg0)
-        for (key, value) in eventData {
-            print("\(key as Optional): \(value as Optional)")
-        }
-
-        if let tmp = eventData[":id"] {
-                    let str = try String.fromEmacsVal(env, tmp)
-            print("\n\nid: \(str as Optional)")
-        }
-
-        emacs_error(env, "error", "I hate you")
-    }
-        }
-        catch {
-            emacs_process_error(env, error)
-        }
     }
     return Qnil
 }
@@ -432,9 +546,9 @@ the new calendar.
 Returns the data of the newly event.
 """)
 
-        emacs_defun(env, "maccalfw-get-event", 1, 1, maccalfw_remove_event,
+        emacs_defun(env, "maccalfw-get-event", 1, 2, maccalfw_get_event,
                     "Return event details given its ID.")
-        emacs_defun(env, "maccalfw-remove-event", 1, 1, maccalfw_remove_event,
+        emacs_defun(env, "maccalfw-remove-event", 1, 2, maccalfw_remove_event,
                     "Remove an event given its ID.")
         emacs_defun(env, "maccalfw-timezones", 0, 0, maccalfw_timezones,
                     "Returns a list of system timezones.")

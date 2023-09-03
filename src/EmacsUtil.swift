@@ -6,6 +6,12 @@ import EventKit
 @_cdecl("plugin_is_GPL_compatible")
 public func plugin_is_GPL_compatible() {}
 
+typealias EmacsDefunCallback  = (@convention(c)
+                                 (UnsafeMutablePointer<emacs_env>?,
+                                  Int,
+                                  UnsafeMutablePointer<emacs_value?>?,
+                                  UnsafeMutableRawPointer?) -> emacs_value?)?
+
 enum EmacsError : Error {
     case error(String)
     case wrong_type_argument(String)
@@ -113,7 +119,7 @@ func emacs_funcall(_ env: UnsafeMutablePointer<emacs_env>,
 
 extension Array : EmacsCastable where Element == EmacsCastable?  {
     func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
-        var arguments = self.map{emacs_cast(env, $0)}
+        var arguments = self.map{$0?.toEmacsVal(env) ?? Qnil}
         let count = arguments.count
         return arguments.withUnsafeMutableBufferPointer{
             bufferPointer in
@@ -137,66 +143,9 @@ extension Dictionary : EmacsCastable where Key == emacs_value?, Value == EmacsCa
           Array(self.flatMap
                 { key, value in return
                                   [key as EmacsCastable?,
-                                   value as EmacsCastable?]})
+                                   value]})
         return flatArgs.toEmacsVal(env)
     }
-}
-
-extension EKEventAvailability : EmacsCastable  {
-    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
-        switch self {
-        case .tentative:
-            return env.pointee.intern(env, "tentative")
-        case .free:
-            return env.pointee.intern(env, "free")
-        case .busy:
-            return env.pointee.intern(env, "busy")
-        case .unavailable:
-            return env.pointee.intern(env, "unavailable")
-        case .notSupported:
-            fallthrough
-        @unknown default:
-            return nil
-        }
-    }
-    static func parse(_ val: String )  throws -> EKEventAvailability {
-        switch val {
-        case "notSupported":
-            return .notSupported
-        case "busy":
-            return .busy
-        case "free":
-            return .free
-        case "tentative":
-            return .tentative
-        case "unavailable":
-            return .unavailable
-        default:
-            throw EmacsError.wrong_type_argument("Unrecognised availability")
-        }
-    }
-}
-
-extension EKEventStatus : EmacsCastable  {
-    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
-        switch self {
-        case .confirmed:
-            return env.pointee.intern(env, "confirmed")
-        case .tentative:
-            return env.pointee.intern(env, "tentative")
-        case .canceled:
-            return env.pointee.intern(env, "cancelled")
-        case .none:
-            fallthrough
-        @unknown default:
-            return nil
-        }
-    }
-}
-
-func emacs_cast(_ env: UnsafeMutablePointer<emacs_env>,
-                        _ val: EmacsCastable?) -> emacs_value? {
-    return val?.toEmacsVal(env) ?? Qnil
 }
 
 func emacs_defun(_ env: UnsafeMutablePointer<emacs_env>,
@@ -278,7 +227,7 @@ func emacs_error(_ env: UnsafeMutablePointer<emacs_env>,
                  _ msg : String? = nil) {
     env.pointee.non_local_exit_signal(
       env, env.pointee.intern(env, symbol),
-      ([msg] as [EmacsCastable?]).toEmacsVal(env) ?? nil);
+      ([msg]).toEmacsVal(env));
 }
 
 

@@ -534,7 +534,8 @@ EVENT-DATA contains the initial event information."
    (list (or (get-text-property (point) 'cfw:event)
              (error "No event at location"))))
   (prog1 (maccalfw-remove-event
-          (plist-get (cfw:event-data event) :id))
+          (plist-get (cfw:event-data event) :id)
+          (plist-get (cfw:event-data event) :start))
     (message "Event deleted")
     (cfw:refresh-calendar-buffer nil)))
 
