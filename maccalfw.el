@@ -169,7 +169,7 @@ next day."
                     (list 59 59 23)
                   (list 0 0 0))
                 (list (nth 1 date)
-                     (nth 0 date)
+                      (nth 0 date)
                       (nth 2 date)))))
 
 (defun maccalfw--decode-time (time)
@@ -200,17 +200,17 @@ The event is returned `maccalfw-fetch-events'."
 (defun maccalfw--convert-to-calfw (events-list)
   "Convert an EVENTS-LIST to calfw events."
   (cl-loop for e in events-list
-        for event = (maccalfw--convert-event e)
-        if event
-        if (cfw:event-end-date event)
-        collect event into periods
-        else
-        collect event into contents
-        else do
-        (progn
-          (message "Ignoring event \"%s\"" e)
-          (message "Cannot handle this event, tag: %s" e))
-        finally (return `((periods ,periods) ,@contents))))
+           for event = (maccalfw--convert-event e)
+           if event
+           if (cfw:event-end-date event)
+           collect event into periods
+           else
+           collect event into contents
+           else do
+           (progn
+             (message "Ignoring event \"%s\"" e)
+             (message "Cannot handle this event, tag: %s" e))
+           finally (return `((periods ,periods) ,@contents))))
 
 (defun maccalfw--get-calendar-events (cal-id begin end)
   "Return all calendar event corresponding CAL-ID.
@@ -221,15 +221,15 @@ events between BEGIN and END are returned."
             (maccalfw-fetch-events cal-id
                                    (maccalfw--encode-date begin)
                                    (maccalfw--encode-date end t)))
-        if (and (listp event)
-                (equal 'periods (car event)))
-        collect
-        (cons
-         'periods
-         (cl-loop for evt in (cadr event)
-               collect evt))
-        else
-        collect event))
+           if (and (listp event)
+                   (equal 'periods (car event)))
+           collect
+           (cons
+            'periods
+            (cl-loop for evt in (cadr event)
+                     collect evt))
+           else
+           collect event))
 
 (defun maccalfw--create-source (name cal-id color)
   "Create a cfw:source out of a calendar.
@@ -395,67 +395,67 @@ If FOR-END-DATE is non-nil, set the end-date only."
   (let ((widgets (maccalfw-event--get-widgets)))
     (if (widget-get (maccalfw-event--find-widget 'start-time widgets)
                     :inactive)
-      (maccalfw-event-read-only)
+        (maccalfw-event-read-only)
       (let* ((start-time-wid (maccalfw-event--find-widget 'start-time widgets))
              (start-date-wid (maccalfw-event--find-widget 'start-date widgets))
              (end-time-wid (maccalfw-event--find-widget 'end-time widgets))
              (end-date-wid (maccalfw-event--find-widget 'end-date widgets))
              (all-day-wid (maccalfw-event--find-widget 'all-day widgets))
-           (all-day-p  (widget-value all-day-wid))
-           (start-time
-            (maccalfw-event--parse-datetime
-             (if all-day-p
-                 "00:00"
-               (widget-value start-time-wid))
-             (widget-value start-date-wid)))
-           (end-time
-            (maccalfw-event--parse-datetime
-             (if all-day-p
-                 "23:59"
-               (widget-value end-time-wid))
-             (widget-value end-date-wid)))
-           ;; Define these two to make sure they are bound for `org-read-date'
-           org-time-was-given
-           org-end-time-was-given
-           (new-time (org-read-date
-                      (not (widget-value all-day-wid))
-                      t
-                      nil
-                      "Event"
-                      (if for-end-date
-                          end-time
-                        start-time))))
-      (save-excursion
-        (widget-value-set (if (and for-end-date all-day-p)
-                              end-date-wid
-                            start-date-wid)
-                          (format-time-string "%F" new-time))
+             (all-day-p  (widget-value all-day-wid))
+             (start-time
+              (maccalfw-event--parse-datetime
+               (if all-day-p
+                   "00:00"
+                 (widget-value start-time-wid))
+               (widget-value start-date-wid)))
+             (end-time
+              (maccalfw-event--parse-datetime
+               (if all-day-p
+                   "23:59"
+                 (widget-value end-time-wid))
+               (widget-value end-date-wid)))
+             ;; Define these two to make sure they are bound for `org-read-date'
+             org-time-was-given
+             org-end-time-was-given
+             (new-time (org-read-date
+                        (not (widget-value all-day-wid))
+                        t
+                        nil
+                        "Event"
+                        (if for-end-date
+                            end-time
+                          start-time))))
+        (save-excursion
+          (widget-value-set (if (and for-end-date all-day-p)
+                                end-date-wid
+                              start-date-wid)
+                            (format-time-string "%F" new-time))
 
-        (when (not for-end-date)
-          ;; Shift end date as well
-          (widget-value-set
-           end-date-wid
-           (format-time-string "%F"
-                               (time-add new-time
-                                         (* (- (time-to-days end-time)
-                                               (time-to-days start-time))
-                                            24 60 60)))))
+          (when (not for-end-date)
+            ;; Shift end date as well
+            (widget-value-set
+             end-date-wid
+             (format-time-string "%F"
+                                 (time-add new-time
+                                           (* (- (time-to-days end-time)
+                                                 (time-to-days start-time))
+                                              24 60 60)))))
 
-        (when (and (not all-day-p) org-time-was-given)
-          ;; Update time as well
-          (if (or (not for-end-date) org-end-time-was-given)
-              (progn
-                (widget-value-set start-time-wid
-                                  (maccalfw-event--format-time new-time))
+          (when (and (not all-day-p) org-time-was-given)
+            ;; Update time as well
+            (if (or (not for-end-date) org-end-time-was-given)
+                (progn
+                  (widget-value-set start-time-wid
+                                    (maccalfw-event--format-time new-time))
                   (widget-value-set
                    end-time-wid
-                                  (or org-end-time-was-given
-                                      (maccalfw-event--format-time
-                                       (time-add new-time
-                                                 (time-subtract end-time
-                                                                start-time))))))
-            ;; for-end-date and range not given
-            (widget-value-set end-time-wid
+                   (or org-end-time-was-given
+                       (maccalfw-event--format-time
+                        (time-add new-time
+                                  (time-subtract end-time
+                                                 start-time))))))
+              ;; for-end-date and range not given
+              (widget-value-set end-time-wid
                                 (maccalfw-event--format-time new-time)))))))))
 
 (defun maccalfw-event-open (event)
@@ -533,11 +533,12 @@ EVENT-DATA contains the initial event information."
   (interactive
    (list (or (get-text-property (point) 'cfw:event)
              (error "No event at location"))))
-  (prog1 (maccalfw-remove-event
-          (plist-get (cfw:event-data event) :id)
-          (plist-get (cfw:event-data event) :start))
-    (message "Event deleted")
-    (cfw:refresh-calendar-buffer nil)))
+  (or (prog1 (maccalfw-remove-event
+              (plist-get (cfw:event-data event) :id)
+              (plist-get (cfw:event-data event) :start))
+        (message "Event deleted")
+        (cfw:refresh-calendar-buffer nil))
+      (error "Deleting event failed")))
 
 (defun maccalfw-event--widget-overlay (widget key delete &rest props)
   "Create an overlay around WIDGET, setting its PROPS.
@@ -657,24 +658,24 @@ which is the old value of the timezone (will be updated in this
 function)."
   (let ((widgets (maccalfw-event--get-widgets)))
     (unless (widget-value (maccalfw-event--find-widget 'all-day widgets))
-  (let* ((old-tz (widget-get widget :old-value))
-         (tz (widget-value widget)))
-    (save-excursion
-      (cl-loop for (date-wid . time-wid) in '((start-date . start-time)
-                                              (end-date . end-time))
+      (let* ((old-tz (widget-get widget :old-value))
+             (tz (widget-value widget)))
+        (save-excursion
+          (cl-loop for (date-wid . time-wid) in '((start-date . start-time)
+                                                  (end-date . end-time))
                    for time-widget = (maccalfw-event--find-widget
                                       time-wid widgets)
                    for date-widget = (maccalfw-event--find-widget
                                       date-wid widgets)
-               do
-               (widget-value-set
-                time-widget
-                (maccalfw-event--format-time
-                 (maccalfw-event--parse-datetime
-                    (widget-value time-widget)
-                  (widget-value date-widget)
-                  old-tz)
-                 tz)))
+                   do
+                   (widget-value-set
+                    time-widget
+                    (maccalfw-event--format-time
+                     (maccalfw-event--parse-datetime
+                      (widget-value time-widget)
+                      (widget-value date-widget)
+                      old-tz)
+                     tz)))
           (widget-put widget :old-value tz))))))
 
 (defun maccalfw-event--all-day-notify (widget &rest _)
