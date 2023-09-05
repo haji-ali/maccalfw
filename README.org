@@ -16,9 +16,8 @@ that you have straight installed.
   (use-package maccalfw
     :commands maccalfw-open
     :straight (:host github
-                     :repo "https://github.com/haji-ali/maccalfw.git"
-                     :files ("maccalfw.el" ("src" . "src"))
-                     :depth full))
+                     :repo "haji-ali/maccalfw"
+                     :files ("maccalfw.el" ("src" . "src"))))
 #+end_src
 
 You will need to have the Swift compiler (=swiftc=) which is needed to compile
