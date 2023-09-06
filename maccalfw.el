@@ -38,6 +38,7 @@
 
 (require 'calfw)
 (require 'wid-edit)
+(require 'org)
 
 (defcustom maccalfw-event-save-hook nil
   "Hook called when an event is saved successfully.
@@ -125,7 +126,7 @@ loading."
                           (executable-find "swiftc")
                           (error "maccalfw: No swift compiler found")))
                (default-directory (file-name-directory
-                                   (car (feature-symbols 'maccalfw))))
+                                   (locate-library "maccalfw")))
                (command
                 `(,swift "-Xcc" "-fmodule-map-file=src/module.modulemap"
                          "-I/opt/homebrew/include/"
@@ -397,7 +398,6 @@ If FOR-END-DATE is non-nil, set the end-date only."
                     (when-let ((wid (widget-at (point)))
                                (key (widget-get wid :field-key)))
                       (member key '(end-time end-date))))))
-
   (let ((widgets (maccalfw-event--get-widgets)))
     (if (widget-get (maccalfw-event--find-widget 'start-time widgets)
                     :inactive)
