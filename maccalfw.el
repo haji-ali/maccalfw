@@ -5,7 +5,7 @@
 ;; Author: Al Haji-Ali <abdo.haji.ali at gmail.com>
 ;; Created: 2023
 ;; Version: 0.1
-;; Package-Requires: ((emacs "28.1"))
+;; Package-Requires: ((emacs "28.1") (calfw "1.7"))
 ;; Homepage: https://github.com/haji-ali/maccalfw
 ;; Keywords: calendar
 
@@ -125,7 +125,7 @@ loading."
                           (executable-find "swiftc")
                           (error "maccalfw: No swift compiler found")))
                (default-directory (file-name-directory
-                                   (feature-file 'maccalfw)))
+                                   (car (feature-symbols 'maccalfw))))
                (command
                 `(,swift "-Xcc" "-fmodule-map-file=src/module.modulemap"
                          "-I/opt/homebrew/include/"
