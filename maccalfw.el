@@ -180,10 +180,11 @@ next day."
 (defun maccalfw--convert-event (event)
   "Convert an EVENT to a calfw event.
 The event is returned `maccalfw-fetch-events'."
-  (let ((start (decode-time (plist-get event :start)))
+  (let* ((start (decode-time (plist-get event :start)))
         (end (decode-time (plist-get event :end)))
-        (all-day-p (plist-get event :all-day-p)))
-    (make-cfw:event
+         (all-day-p (plist-get event :all-day-p))
+         (args
+          (list
      :start-date  (maccalfw--decode-date start)
      :start-time  (unless all-day-p
                     (maccalfw--decode-time start))
@@ -193,9 +194,14 @@ The event is returned `maccalfw-fetch-events'."
                     (maccalfw--decode-time end))
      :title       (plist-get event :title)
      :location    (plist-get event :location)
-     :description (plist-get event :summary)
+           :description (plist-get event :summary))))
+    (when (and (alist-get 'status (cl-struct-slot-info 'cfw:event))
+               (alist-get 'data (cl-struct-slot-info 'cfw:event)))
+      (setq args
+            (append args (list
      :status       (plist-get event :status)
-     :data        event)))
+                          :data        event))))
+    (apply 'make-cfw:event args)))
 
 (defun maccalfw--convert-to-calfw (events-list)
   "Convert an EVENTS-LIST to calfw events."
