@@ -476,6 +476,8 @@ private func maccalfw_timezones(
   _ data: UnsafeMutableRawPointer?) -> emacs_value?
 {
     if let env {
+        do {
+            try AuthorizeCalendar(env)
         let Qname = env.pointee.intern(env, ":name")
         let Qabbrev = env.pointee.intern(env, ":abbrev")
         let Qoffset = env.pointee.intern(env, ":offset")
@@ -499,6 +501,29 @@ private func maccalfw_timezones(
             }
             return emacs_cons(env, $0.toEmacsVal(env), Qnil)
         }.toEmacsVal(env)
+    }
+        catch {
+            emacs_process_error(env, error)
+        }
+    }
+    return Qnil
+}
+
+
+private func maccalfw_refresh(
+  _ env: UnsafeMutablePointer<emacs_env>?,
+  _ nargs: Int,
+  _ args: UnsafeMutablePointer<emacs_value?>?,
+  _ data: UnsafeMutableRawPointer?) -> emacs_value?
+{
+    if let env {
+        do {
+            try AuthorizeCalendar(env)
+            eventStore.refreshSourcesIfNecessary()
+        }
+        catch {
+            emacs_process_error(env, error)
+        }
     }
     return Qnil
 }
@@ -552,6 +577,9 @@ Returns the data of the newly event.
                     "Remove an event given its ID.")
         emacs_defun(env, "maccalfw-timezones", 0, 0, maccalfw_timezones,
                     "Returns a list of system timezones.")
+        emacs_defun(env, "maccalfw-refresh", 0, 0, maccalfw_refresh,
+                    "Refreshes local data from remote sources.")
+
     }
     return 0
 }
