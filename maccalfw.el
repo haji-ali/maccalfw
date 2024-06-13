@@ -295,41 +295,33 @@ Warn if the buffer is modified and offer to save."
   (let* ((widgets (maccalfw-event--get-widgets))
          (title-wid (maccalfw-event--find-widget 'title widgets))
          (old-data (widget-get title-wid :event-data))
-         (tz (widget-value (maccalfw-event--find-widget 'timezone widgets)))
-         (all-day (widget-value (maccalfw-event--find-widget
-                                 'all-day widgets)))
+         (tz (maccalfw-event--value 'timezone widgets))
+         (all-day (maccalfw-event--value 'all-day widgets))
          (start (maccalfw-event--parse-datetime
                  (if all-day
                      "00:00"
-                   (widget-value (maccalfw-event--find-widget
-                                  'start-time widgets)))
-                 (widget-value (maccalfw-event--find-widget
-                                'start-date widgets))
+                   (maccalfw-event--value 'start-time widgets))
+                 (maccalfw-event--value 'start-date widgets)
                  tz))
          (end (maccalfw-event--parse-datetime
                (if all-day
                    "23:59:59"
-                 (widget-value (maccalfw-event--find-widget
-                                'end-time widgets)))
+                 (maccalfw-event--value 'end-time widgets))
                (if all-day
-                   (widget-value (maccalfw-event--find-widget 'end-date widgets))
-                 (widget-value (maccalfw-event--find-widget 'start-date widgets)))
+                   (maccalfw-event--value 'end-date widgets)
+                 (maccalfw-event--value 'start-date widgets))
                tz))
          (new-data
           (list
            :id (plist-get old-data :id)
-           :calendar-id (widget-value (maccalfw-event--find-widget
-                                       'calendar-id widgets))
+           :calendar-id (maccalfw-event--value 'calendar-id widgets)
            :title (widget-value title-wid)
            :timezone (if all-day "" tz)
            :all-day-p all-day
-           :url (widget-value (maccalfw-event--find-widget 'url widgets))
-           :location (widget-value (maccalfw-event--find-widget
-                                    'location widgets))
-           :availability (widget-value (maccalfw-event--find-widget
-                                        'availability widgets))
-           :notes (widget-value (maccalfw-event--find-widget
-                                 'notes widgets))))
+           :url (maccalfw-event--value 'url widgets)
+           :location (maccalfw-event--value 'location widgets)
+           :availability (maccalfw-event--value 'availability widgets)
+           :notes (maccalfw-event--value 'notes widgets)))
          (new-event (null (plist-get old-data :id))))
     (if (plist-get old-data :read-only)
         (user-error "Event is not editable.?"))
@@ -591,6 +583,10 @@ If ACTIVE is t, activate widgets instead"
               'priority 100
               'modification-hooks '(maccalfw-event-read-only)))))
 
+(defun maccalfw-event--value (key widgets)
+  "Get value of widget field corresponding to KEY in WIDGETS."
+  (widget-value (maccalfw-event--find-widget (key widgets))))
+
 (defun maccalfw-event--find-widget (key widgets)
   "Find widget field corresponding to KEY in WIDGETS."
   (cl-find-if
@@ -665,7 +661,7 @@ Assumes that WIDGET has an additional attributes `:old-value'
 which is the old value of the timezone (will be updated in this
 function)."
   (let ((widgets (maccalfw-event--get-widgets)))
-    (unless (widget-value (maccalfw-event--find-widget 'all-day widgets))
+    (unless (maccalfw-event--value 'all-day widgets)
       (let* ((old-tz (widget-get widget :old-value))
              (tz (widget-value widget)))
         (save-excursion
