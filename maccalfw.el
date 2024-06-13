@@ -311,7 +311,9 @@ Warn if the buffer is modified and offer to save."
                    "23:59:59"
                  (widget-value (maccalfw-event--find-widget
                                 'end-time widgets)))
-               (widget-value (maccalfw-event--find-widget 'end-date widgets))
+               (if all-day
+                   (widget-value (maccalfw-event--find-widget 'end-date widgets))
+                 (widget-value (maccalfw-event--find-widget 'start-date widgets)))
                tz))
          (new-data
           (list
