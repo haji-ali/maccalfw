@@ -585,12 +585,12 @@ If ACTIVE is t, activate widgets instead"
 
 (defun maccalfw-event--value (key widgets)
   "Get value of widget field corresponding to KEY in WIDGETS."
-  (widget-value (maccalfw-event--find-widget (key widgets))))
+  (widget-value (maccalfw-event--find-widget key widgets)))
 
 (defun maccalfw-event--find-widget (key widgets)
   "Find widget field corresponding to KEY in WIDGETS."
   (cl-find-if
-   (lambda (x) (eq key (widget-get x :field-key))) widgets) )
+   (lambda (x) (eq key (widget-get x :field-key))) widgets))
 
 (defun maccalfw-event--get-widgets ()
   "Return all field widget in the current form."
