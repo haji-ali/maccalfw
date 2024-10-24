@@ -29,10 +29,33 @@ extension NSColor {
     }
 }
 
+func toEmacsVal_Enum<T : Hashable>
+  (_ env: UnsafeMutablePointer<emacs_env>,
+   _ map: [T: String],
+   _ t : T) -> emacs_value? {
+    if let emacsString = map[t] {
+        return env.pointee.intern(env, emacsString)
+    }
+    return nil
+}
+
+func parseEmacsVal_Enum<T : Hashable>
+  (_ env: UnsafeMutablePointer<emacs_env>,
+   _ map: [T: String],
+   _ v: emacs_value?) throws -> T {
+    guard let key = try emacs_symbol_to_string(env, v) else {
+        throw EmacsError.wrong_type_argument("Invalid symbol")
+    }
+
+    if let enumvalue = map.first(where: { $0.value == key })?.key {
+        return enumvalue
+    }
+    throw EmacsError.wrong_type_argument("Unrecognized value: \(key)")
+}
+
 protocol EmacsCastable {
     func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value?
 }
-
 
 extension emacs_value : EmacsCastable {
     func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
@@ -104,19 +127,6 @@ extension Date : EmacsCastable {
     }
 }
 
-func emacs_funcall(_ env: UnsafeMutablePointer<emacs_env>,
-                   _ func_name : emacs_value?,
-                   _ args : [emacs_value?]) -> emacs_value? {
-    var arguments = args
-    let count = arguments.count
-    return arguments.withUnsafeMutableBufferPointer{
-        bufferPointer in
-        env.pointee.funcall(env, func_name,
-                            count,
-                            bufferPointer.baseAddress!)
-    }
-}
-
 extension Array : EmacsCastable where Element == EmacsCastable?  {
     func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
         var arguments = self.map{$0?.toEmacsVal(env) ?? Qnil}
@@ -145,6 +155,19 @@ extension Dictionary : EmacsCastable where Key == emacs_value?, Value == EmacsCa
                                   [key as EmacsCastable?,
                                    value]})
         return flatArgs.toEmacsVal(env)
+    }
+}
+
+func emacs_funcall(_ env: UnsafeMutablePointer<emacs_env>,
+                   _ func_name : emacs_value?,
+                   _ args : [emacs_value?]) -> emacs_value? {
+    var arguments = args
+    let count = arguments.count
+    return arguments.withUnsafeMutableBufferPointer{
+        bufferPointer in
+        env.pointee.funcall(env, func_name,
+                            count,
+                            bufferPointer.baseAddress!)
     }
 }
 
@@ -229,7 +252,6 @@ func emacs_error(_ env: UnsafeMutablePointer<emacs_env>,
       env, env.pointee.intern(env, symbol),
       ([msg]).toEmacsVal(env));
 }
-
 
 func emacs_process_error(_ env: UnsafeMutablePointer<emacs_env>,
                          _ error : Error) {

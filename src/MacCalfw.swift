@@ -13,107 +13,54 @@ extension NSNumber  : EmacsCastable {
 }
 
 extension EKEventAvailability : EmacsCastable  {
+    private static let enumMap: [Self : String] = [
+      .tentative: "tentative",
+      .free: "free",
+      .busy: "busy",
+      .unavailable: "unavailable"]
+
+    // TODO: I don't know if I can get away without repeating these definitions
     func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
-        switch self {
-        case .tentative:
-            return env.pointee.intern(env, "tentative")
-        case .free:
-            return env.pointee.intern(env, "free")
-        case .busy:
-            return env.pointee.intern(env, "busy")
-        case .unavailable:
-            return env.pointee.intern(env, "unavailable")
-        case .notSupported:
-            fallthrough
-        @unknown default:
-            return nil
+        return toEmacsVal_Enum(env, Self.enumMap, self)
         }
-    }
-    static func parse(_ val: String )  throws -> EKEventAvailability {
-        switch val {
-        case "notSupported":
-            return .notSupported
-        case "busy":
-            return .busy
-        case "free":
-            return .free
-        case "tentative":
-            return .tentative
-        case "unavailable":
-            return .unavailable
-        default:
-            throw EmacsError.wrong_type_argument("Unrecognised availability")
-        }
+
+    static func parse(_ env: UnsafeMutablePointer<emacs_env>,
+                      _ val: emacs_value?) throws -> Self {
+        return try parseEmacsVal_Enum(env, Self.enumMap, val)
     }
 }
 
 extension EKRecurrenceFrequency : EmacsCastable  {
+    private static let enumMap: [Self: String] = [
+      .daily: "daily",
+      .weekly: "weekly",
+      .monthly: "monthly",
+      .yearly: "yearly"]
+
+
     func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
-        switch self {
-        case .daily:
-            return env.pointee.intern(env, "daily")
-        case .weekly:
-            return env.pointee.intern(env, "weekly")
-        case .monthly:
-            return env.pointee.intern(env, "monthly")
-        case .yearly:
-            return env.pointee.intern(env, "yearly")
-        @unknown default:
-            return nil
+        return toEmacsVal_Enum(env, Self.enumMap, self)
         }
-    }
-    static func parse(_ val: String )  throws -> EKRecurrenceFrequency {
-        switch val {
-        case "daily":
-            return .daily
-        case "weekly":
-            return .weekly
-        case "monthly":
-            return .monthly
-        case "yearly":
-            return .yearly
-        default:
-            throw EmacsError.wrong_type_argument("Unrecognised availability")
-        }
+
+    static func parse(_ env: UnsafeMutablePointer<emacs_env>,
+                      _ val: emacs_value?) throws -> Self {
+        return try parseEmacsVal_Enum(env, Self.enumMap, val)
     }
 }
 
 extension EKEventStatus : EmacsCastable  {
-    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
-        switch self {
-        case .confirmed:
-            return env.pointee.intern(env, "confirmed")
-        case .tentative:
-            return env.pointee.intern(env, "tentative")
-        case .canceled:
-            return env.pointee.intern(env, "cancelled")
-        case .none:
-            fallthrough
-        @unknown default:
-            return nil
-        }
-    }
-}
+    private static let enumMap: [Self: String] = [
+      .confirmed: "confirmed",
+      .tentative: "tentative",
+      .canceled: "cancelled"]
 
-func AuthorizeCalendar(_ env: UnsafeMutablePointer<emacs_env>) throws {
-    switch EKEventStore.authorizationStatus(for: .event) {
-    case .authorized:
-        return
-    case .notDetermined:
-        let semaphore = DispatchSemaphore(value: 0)
-        eventStore.requestAccess(to: .event, completion: {
-                                     (accessGranted: Bool, error: Error?) in
-                                     semaphore.signal()})
-        semaphore.wait()
-        let status = EKEventStore.authorizationStatus(for: EKEntityType.event)
-        if status == EKAuthorizationStatus.authorized {
-            return
-        }
-        throw EmacsError.error("authorization-failed")
-    case .restricted, .denied:
-        fallthrough
-    @unknown default:
-        throw EmacsError.error("not-authorized")
+    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+        return toEmacsVal_Enum(env, Self.enumMap, self)
+    }
+
+    static func parse(_ env: UnsafeMutablePointer<emacs_env>,
+                      _ val: emacs_value?) throws -> Self {
+        return try parseEmacsVal_Enum(env, Self.enumMap, val)
     }
 }
 
@@ -138,8 +85,8 @@ extension EKEvent : EmacsCastable {
            ":organizer" : self.organizer?.name,
            ":recurrence" : self.hasRecurrenceRules ?
              (self.recurrenceRules as [EmacsCastable?]?) : nil,
-           ":read-only" : ((self.organizer?.isCurrentUser ?? true) &&
-                             self.calendar.allowsContentModifications) ? nil : Qt,
+           ":organizer-current-user" : (self.organizer?.isCurrentUser ?? true) ? nil : Qt,
+           ":read-only" : self.calendar.allowsContentModifications ? nil : Qt,
            ":url" : self.url?.absoluteString]
 
         let quoted_plist =
@@ -189,6 +136,30 @@ extension EKRecurrenceRule : EmacsCastable {
                            (env.pointee.intern(env, $0.key), $0.value) })
 
         return quoted_plist.filter{$0.value != nil }.toEmacsVal(env)
+    }
+}
+
+
+private func AuthorizeCalendar(_ env: UnsafeMutablePointer<emacs_env>) throws {
+    switch EKEventStore.authorizationStatus(for: .event) {
+    case .authorized: fallthrough
+    case .fullAccess:
+        return
+    case .notDetermined:
+        let semaphore = DispatchSemaphore(value: 0)
+        eventStore.requestFullAccessToEvents(completion: {
+                                     (accessGranted: Bool, error: Error?) in
+                                     semaphore.signal()})
+        semaphore.wait()
+        let status = EKEventStore.authorizationStatus(for: EKEntityType.event)
+        if status == EKAuthorizationStatus.fullAccess {
+            return
+        }
+        throw EmacsError.error("authorization-failed")
+    case .restricted, .denied, .writeOnly:
+        fallthrough
+    @unknown default:
+        throw EmacsError.error("not-authorized")
     }
 }
 
@@ -414,9 +385,9 @@ private func maccalfw_update_event(
                     event.isAllDay = env.pointee.is_not_nil(env, tmp)
                 }
                 if let tmp = eventData["availability"] {
-                    event.availability = try EKEventAvailability.parse(
-                      try emacs_symbol_to_string(env, tmp)!)
+                    event.availability = try EKEventAvailability.parse(env, tmp)
                 }
+
 
                 // Read-only: occurrenceDate, organizer, last_modified, created_date
                 // detached-p, status
