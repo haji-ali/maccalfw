@@ -289,9 +289,9 @@ Warn if the buffer is modified and offer to save."
     (set-buffer-modified-p nil)
     (quit-window t)))
 
-(defun maccalfw-event-save ()
+(defun maccalfw-event-save (&optional duplicate)
   "Save event."
-  (interactive)
+  (interactive "P")
   (let* ((widgets (maccalfw-event--get-widgets))
          (title-wid (maccalfw-event--find-widget 'title widgets))
          (old-data (widget-get title-wid :event-data))
@@ -311,9 +311,10 @@ Warn if the buffer is modified and offer to save."
                    (maccalfw-event--value 'end-date widgets)
                  (maccalfw-event--value 'start-date widgets))
                tz))
+         (old-id (unless duplicate (plist-get old-data :id)))
          (new-data
           (list
-           :id (plist-get old-data :id)
+           :id old-id
            :calendar-id (maccalfw-event--value 'calendar-id widgets)
            :title (widget-value title-wid)
            :timezone (if all-day "" tz)
@@ -322,7 +323,7 @@ Warn if the buffer is modified and offer to save."
            :location (maccalfw-event--value 'location widgets)
            :availability (maccalfw-event--value 'availability widgets)
            :notes (maccalfw-event--value 'notes widgets)))
-         (new-event (null (plist-get old-data :id))))
+         (new-event (null old-id)))
     (if (plist-get old-data :read-only)
         (user-error "Event is not editable.?"))
     ;; Only keep old-data
@@ -345,9 +346,9 @@ Warn if the buffer is modified and offer to save."
                  (time-equal-p end (plist-get old-data :end)))
       (setq new-data
             (plist-put new-data :end end)))
-    (when (and new-data (plist-get old-data :id))
+    (when (and new-data old-id)
       (setq new-data
-            (plist-put new-data :id (plist-get old-data :id))))
+            (plist-put new-data :id old-id)))
 
     (if new-data
         (progn (widget-put title-wid
@@ -875,6 +876,24 @@ function)."
 
     (when (plist-get event :read-only)
       (maccalfw-event--make-inactive))))
+
+(defun maccalfw-event-duplicate ()
+  "Duplicate current event.
+Should be called on an event-details buffer. Make the event
+editable and remove ID information so that the event will be
+treated as new when saved."
+  (interactive)
+  (let* ((widgets (maccalfw-event--get-widgets))
+         (title-wid (maccalfw-event--find-widget 'title widgets))
+         (data (widget-get title-wid :event-data)))
+    (plist-put data :id nil)
+    (plist-put data :read-only nil)
+
+    ;; If calendar is read-only, we'll an error will be issued when trying to
+    ;; save. So might as well not change it.
+
+    ;; reactivate form
+    (maccalfw-event--make-inactive t)))
 
 (provide 'maccalfw)
 ;;; maccalfw.el ends here
