@@ -782,6 +782,25 @@ function)."
      :notify #'maccalfw-event--all-day-notify
      (plist-get event :all-day-p))
 
+    (maccalfw-event--create-wid
+     'recurrence
+     'checkbox
+     :format " %[%v%] Recurrent? \n"
+     :notify #'maccalfw-event--recurrent-notify
+     (plist-get event :recurrence))
+
+    (maccalfw-event--create-wid
+     'frequency
+     'radio-button-choice
+     :entry-format "  %b %v "
+     :inline t
+     :format "%v\n\n"
+     :value (or (plist-get event :availability) 'busy)
+     '(item :format "%[Daily%] " :value daily)
+     '(item :format "%[Weekly%] " :value weekly)
+     '(item :format "%[Monthly%] " :value monthly)
+     '(item :format "%[Yearly%] " :value yearly))
+
     (unless maccalfw-event--timezones
       (setq
        maccalfw-event--timezones (maccalfw-timezones)
@@ -851,6 +870,8 @@ function)."
       "%v\n\n")
      (or (plist-get event :url) ""))
 
+
+
     (maccalfw-event--create-wid
      'notes 'text
      :format "%v" ; Text after the field!
@@ -876,6 +897,13 @@ function)."
 
     (when (plist-get event :read-only)
       (maccalfw-event--make-inactive))))
+
+(defun maccalfw-event-data ()
+  "Return event data of current event."
+  (let* ((widgets (maccalfw-event--get-widgets))
+         (title-wid (maccalfw-event--find-widget 'title widgets))
+         (data (widget-get title-wid :event-data)))
+    (widget-get title-wid :event-data)))
 
 (defun maccalfw-event-duplicate ()
   "Duplicate current event.

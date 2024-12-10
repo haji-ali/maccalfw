@@ -39,7 +39,7 @@ func toEmacsVal_Enum<T : Hashable>
     return nil
 }
 
-func parseEmacsVal_Enum<T : Hashable>
+func fromEmacsVal_Enum<T : Hashable>
   (_ env: UnsafeMutablePointer<emacs_env>,
    _ map: [T: String],
    _ v: emacs_value?) throws -> T {
@@ -67,6 +67,16 @@ extension Int  : EmacsCastable {
     func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
         return env.pointee.make_integer(env, self)
     }
+
+    static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
+                             _ val : emacs_value?) throws -> Self? {
+        if let val, env.pointee.is_not_nil(env, val) {
+            return env.pointee.extract_integer(env, val);
+        }
+        else {
+            return nil
+        }
+    }
 }
 extension String : EmacsCastable {
     func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
@@ -80,7 +90,7 @@ extension String : EmacsCastable {
     }
 
     static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
-                             _ val : emacs_value?) throws -> String? {
+                             _ val : emacs_value?) throws -> Self? {
         if let val, env.pointee.is_not_nil(env, val) {
             var size: Int = 0
             if !env.pointee.copy_string_contents(env, val, nil, &size) {
@@ -207,7 +217,7 @@ func emacs_cons(_ env: UnsafeMutablePointer<emacs_env>,
     }
 }
 
-func emacs_parse_list(_ env: UnsafeMutablePointer<emacs_env>,
+func fromEmacsVal_list(_ env: UnsafeMutablePointer<emacs_env>,
                       _ val: emacs_value?) -> [emacs_value?] {
     var ret: [emacs_value?] = []
     var cdr: emacs_value? = val
@@ -226,9 +236,9 @@ func emacs_symbol_to_string(_ env: UnsafeMutablePointer<emacs_env>,
     return try String.fromEmacsVal(env,emacs_funcall(env, Qsymbol_name, [val]))
 }
 
-func emacs_parse_plist(_ env: UnsafeMutablePointer<emacs_env>,
+func fromEmacsVal_plist(_ env: UnsafeMutablePointer<emacs_env>,
                        _ val: emacs_value?) throws -> [String?: emacs_value?] {
-    let list_data = emacs_parse_list(env, val)
+    let list_data = fromEmacsVal_list(env, val)
     var result: [String?: emacs_value?] = [:]
 
     for index in stride(from: 0, to: list_data.count, by: 2) {

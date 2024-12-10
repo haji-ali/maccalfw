@@ -24,9 +24,9 @@ extension EKEventAvailability : EmacsCastable  {
         return toEmacsVal_Enum(env, Self.enumMap, self)
         }
 
-    static func parse(_ env: UnsafeMutablePointer<emacs_env>,
+    static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
                       _ val: emacs_value?) throws -> Self {
-        return try parseEmacsVal_Enum(env, Self.enumMap, val)
+        return try fromEmacsVal_Enum(env, Self.enumMap, val)
     }
 }
 
@@ -42,9 +42,30 @@ extension EKRecurrenceFrequency : EmacsCastable  {
         return toEmacsVal_Enum(env, Self.enumMap, self)
         }
 
-    static func parse(_ env: UnsafeMutablePointer<emacs_env>,
+    static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
                       _ val: emacs_value?) throws -> Self {
-        return try parseEmacsVal_Enum(env, Self.enumMap, val)
+        return try fromEmacsVal_Enum(env, Self.enumMap, val)
+    }
+}
+
+extension EKWeekday: EmacsCastable {
+    private static let enumMap: [Self: String] = [
+        .sunday: "sunday",
+        .monday: "monday",
+        .tuesday: "tuesday",
+        .wednesday: "wednesday",
+        .thursday: "thursday",
+        .friday: "friday",
+        .saturday: "saturday"
+    ]
+
+    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+        return toEmacsVal_Enum(env, Self.enumMap, self)
+    }
+
+    static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
+                             _ val: emacs_value?) throws -> Self {
+        return try fromEmacsVal_Enum(env, Self.enumMap, val)
     }
 }
 
@@ -58,9 +79,9 @@ extension EKEventStatus : EmacsCastable  {
         return toEmacsVal_Enum(env, Self.enumMap, self)
     }
 
-    static func parse(_ env: UnsafeMutablePointer<emacs_env>,
+    static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
                       _ val: emacs_value?) throws -> Self {
-        return try parseEmacsVal_Enum(env, Self.enumMap, val)
+        return try fromEmacsVal_Enum(env, Self.enumMap, val)
     }
 }
 
@@ -111,6 +132,20 @@ extension EKRecurrenceDayOfWeek : EmacsCastable {
 
         return quoted_plist.filter{$0.value != nil }.toEmacsVal(env)
     }
+
+    static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
+                             _ val: emacs_value?) throws -> Self {
+      let data = try fromEmacsVal_plist(env, val);
+      let dayOfTheWeek : EKWeekday  = try EKWeekday.fromEmacsVal(env, data["week-day"]!)
+      // if let tmp = data["week-day"] {
+      //     dayOfTheWeek = EKWeekday.fromEmacsVal(env, tmp)
+      // }
+      if let tmp = data["week-number"] {
+          let weekNumber : Int = try Int.fromEmacsVal(env, tmp)!
+          return Self(dayOfTheWeek: dayOfTheWeek, weekNumber: weekNumber)
+      }
+      return Self.init(dayOfTheWeek)
+    }
 }
 
 extension EKRecurrenceRule : EmacsCastable {
@@ -136,6 +171,60 @@ extension EKRecurrenceRule : EmacsCastable {
                            (env.pointee.intern(env, $0.key), $0.value) })
 
         return quoted_plist.filter{$0.value != nil }.toEmacsVal(env)
+    }
+
+    static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
+                             _ val: emacs_value?) throws -> Self {
+        let data = try fromEmacsVal_plist(env, val);
+        let freq = try EKRecurrenceFrequency.fromEmacsVal(env, data["frequency"]!)
+        let interval = try Int.fromEmacsVal(env, data["interval"]!)!
+        var daysOfTheWeek: [EKRecurrenceDayOfWeek]? = nil
+        var end: EKRecurrenceEnd? = nil
+        var daysOfTheMonth, daysOfTheYear,
+              weeksOfTheYear, monthsOfTheYear, setPositions : [NSNumber]?
+
+        // Simple rule
+        if let tmp = data["end-date"] {
+            end = EKRecurrenceEnd.init(end: try Date.fromEmacsVal(env, tmp)!)
+        }
+        if let tmp = data["occurrence-count"] {
+            end = EKRecurrenceEnd.init(occurrenceCount:
+                                       try Int.fromEmacsVal(env, tmp)!)
+        }
+        // Complex rule
+        if let tmp = data["daysOfTheWeek"] {
+            daysOfTheWeek = try fromEmacsVal_list(env, tmp).map{
+              try EKRecurrenceDayOfWeek.fromEmacsVal(env, $0)}
+        }
+        if let tmp = data["daysOfTheMonth"] {
+            daysOfTheMonth = try fromEmacsVal_list(env, tmp).map{
+              NSNumber(value: try Int.fromEmacsVal(env, $0)!)}
+        }
+        if let tmp = data["daysOfTheYear"] {
+            daysOfTheYear = try fromEmacsVal_list(env, tmp).map{
+              NSNumber(value: try Int.fromEmacsVal(env, $0)!)}
+        }
+        if let tmp = data["weeksOfTheYear"] {
+            weeksOfTheYear = try fromEmacsVal_list(env, tmp).map{
+              NSNumber(value: try Int.fromEmacsVal(env, $0)!)}
+        }
+        if let tmp = data["monthsOfTheYear"] {
+            monthsOfTheYear = try fromEmacsVal_list(env, tmp).map{
+              NSNumber(value: try Int.fromEmacsVal(env, $0)!)}
+        }
+        if let tmp = data["setPositions"] {
+            setPositions = try fromEmacsVal_list(env, tmp).map{
+              NSNumber(value: try Int.fromEmacsVal(env, $0)!)}
+        }
+        return Self(recurrenceWith: freq,
+                    interval: interval,
+                    daysOfTheWeek: daysOfTheWeek,
+                    daysOfTheMonth: daysOfTheMonth,
+                    monthsOfTheYear: monthsOfTheYear,
+                    weeksOfTheYear: weeksOfTheYear,
+                    daysOfTheYear: daysOfTheYear,
+                    setPositions: setPositions,
+                    end: end)
     }
 }
 
@@ -242,7 +331,7 @@ private func maccalfw_fetch_events(
                               env,
                               emacs_funcall(env,env.pointee.intern(env, "listp"),
                                             [arg0])){
-                        calendar_ids = try emacs_parse_list(env, arg0).map{
+                        calendar_ids = try fromEmacsVal_list(env, arg0).map{
                             try String.fromEmacsVal(env, $0)}
                     }
                     else {
@@ -325,7 +414,7 @@ private func maccalfw_update_event(
             if let args, let arg0 = args[0] {
                 try AuthorizeCalendar(env)
 
-                let eventData = try emacs_parse_plist(env, arg0)
+                let eventData = try fromEmacsVal_plist(env, arg0)
                 let eventId =
                   try eventData["id"].map { try String.fromEmacsVal(env, $0) }
                 var event : EKEvent
@@ -357,6 +446,10 @@ private func maccalfw_update_event(
                 if let tmp = eventData["title"] {
                     event.title = try String.fromEmacsVal(env, tmp)
                 }
+                if let tmp = eventData["recurrence"] {
+                    event.recurrenceRules = try fromEmacsVal_list(env, tmp).map{
+                      try EKRecurrenceRule.fromEmacsVal(env, $0)}
+                  }
                 if let tmp = eventData["start"] {
                     event.startDate = try Date.fromEmacsVal(env, tmp)
                 }
@@ -385,7 +478,7 @@ private func maccalfw_update_event(
                     event.isAllDay = env.pointee.is_not_nil(env, tmp)
                 }
                 if let tmp = eventData["availability"] {
-                    event.availability = try EKEventAvailability.parse(env, tmp)
+                    event.availability = try EKEventAvailability.fromEmacsVal(env, tmp)
                 }
 
 
