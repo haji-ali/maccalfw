@@ -78,6 +78,19 @@ extension Int  : EmacsCastable {
         }
     }
 }
+
+
+extension Bool : EmacsCastable {
+    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+        return self ? Qt : Qnil;
+    }
+
+    static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
+                             _ val : emacs_value?) throws -> Self {
+        return env.pointee.is_not_nil(env, val)
+    }
+}
+
 extension String : EmacsCastable {
     func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
         let cString = self.utf8CString

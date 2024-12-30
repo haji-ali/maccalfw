@@ -122,7 +122,7 @@ extension EKEvent : EmacsCastable {
 extension EKRecurrenceDayOfWeek : EmacsCastable {
     func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
         let plist : [String : EmacsCastable?] =
-          [":week-day" : self.dayOfTheWeek.rawValue,
+          [":week-day" : self.dayOfTheWeek,
            ":week-number" : self.weekNumber]
 
         let quoted_plist =
@@ -153,7 +153,8 @@ extension EKRecurrenceRule : EmacsCastable {
         let plist : [String : EmacsCastable?] =
           [":end-date" : self.recurrenceEnd?.endDate as EmacsCastable?,
            ":occurrence-count" : self.recurrenceEnd?.occurrenceCount,
-           ":calendar-id": self.calendarIdentifier,
+           // Seems to just be "gregorian!"
+           // ":calendar-id": self.calendarIdentifier,
            ":interval": self.interval,
            ":frequency": self.frequency,
            ":week-first-day": self.firstDayOfTheWeek,
@@ -162,8 +163,7 @@ extension EKRecurrenceRule : EmacsCastable {
            ":year-days": self.daysOfTheYear as [EmacsCastable?]?,
            ":year-weeks": self.weeksOfTheYear as [EmacsCastable?]?,
            ":year-months": self.monthsOfTheYear as [EmacsCastable?]?,
-           ":set-positions": self.setPositions as [EmacsCastable?]?
-          ]
+           ":set-positions": self.setPositions as [EmacsCastable?]?]
 
         let quoted_plist =
           Dictionary(uniqueKeysWithValues:
@@ -413,6 +413,7 @@ private func maccalfw_update_event(
         do {
             if let args, let arg0 = args[0] {
                 try AuthorizeCalendar(env)
+                let future = nargs > 1 ? try Bool.fromEmacsVal(env, args[1]) : false
 
                 let eventData = try fromEmacsVal_plist(env, arg0)
                 let eventId =
@@ -448,8 +449,8 @@ private func maccalfw_update_event(
                 }
                 if let tmp = eventData["recurrence"] {
                     event.recurrenceRules = try fromEmacsVal_list(env, tmp).map{
-                      try EKRecurrenceRule.fromEmacsVal(env, $0)}
-                  }
+                        try EKRecurrenceRule.fromEmacsVal(env, $0)}
+                }
                 if let tmp = eventData["start"] {
                     event.startDate = try Date.fromEmacsVal(env, tmp)
                 }
@@ -486,7 +487,9 @@ private func maccalfw_update_event(
                 // detached-p, status
 
                 do {
-                    try eventStore.save(event, span: .thisEvent)
+                    try eventStore.save(event,
+                                        span: future ? .futureEvents : .thisEvent,
+                                        commit: true)
                     return event.toEmacsVal(env)
                 } catch {
                     throw EmacsError.error("Failed to save event with error: \(error.localizedDescription)")
@@ -511,10 +514,13 @@ private func maccalfw_remove_event(
             try AuthorizeCalendar(env)
             if let arg0 = args[0], let eventId = try String.fromEmacsVal(env, arg0) {
                 let start = nargs > 1 ? try Date.fromEmacsVal(env, args[1]) : nil
+                let future = nargs > 2 ? try Bool.fromEmacsVal(env, args[2]) : false
 
                 if let event = getEKEvent(eventId, start) {
                     do {
-                        try eventStore.remove(event, span: .thisEvent)
+                        try eventStore.remove(event,
+                                              span: future ? .futureEvents : .thisEvent,
+                                              commit: true)
                         return Qt
                     } catch {
                         throw EmacsError.error("Failed to remove event with error: \(error.localizedDescription)")
@@ -614,31 +620,51 @@ Each item in the list contains contains id, title, color and an editable predica
 """)
         emacs_defun(env, "maccalfw-fetch-events", 3, 3, maccalfw_fetch_events,
 """
-Get a list of events in a calendar.
-Takes as arguments the CALENDAR-ID, START-TIME and END-TIME.
+Get a list of events in a calendar between START-TIME and END-TIME.
 The times are encoded times.
 If CALENDAR-ID is nil, return all events. CALENDAR-ID can also be a list of
 calendar IDs.
+
+(fn CALENDAR-ID START-TIME END-TIME)
 """)
 
-        emacs_defun(env, "maccalfw-update-event", 1, 1, maccalfw_update_event,
+        emacs_defun(env, "maccalfw-update-event", 1, 2, maccalfw_update_event,
 """
-Update or create an event.
-Takes as an argument a plist of the EVENT.
-Only the key-value pairs in the plist are updated. If the plist contains a
-non-nil `:id` then the corresponding event is updated. Otherwise, the plist
-must contain `:calendar-id` entry and an event is created.
+Update or create an EVENT.
+EVENT is a plist specifying event data. Only the key-value pairs in the plist
+are updated. If the plist contains a non-nil `:id` then the corresponding
+event is updated. Otherwise, the plist must contain `:calendar-id` entry and
+an event is created.
+
+If FUTURE is non-nil, all future events in a recurrent series are updated,
+otherwise only the given event is updated.
 
 Note that if the event has a different `:calendar-id`, the event moved to
 the new calendar.
 
 Returns the data of the newly event.
+
+(fn ID &optional FUTURE)
 """)
 
         emacs_defun(env, "maccalfw-get-event", 1, 2, maccalfw_get_event,
-                    "Return event details given its ID.")
-        emacs_defun(env, "maccalfw-remove-event", 1, 2, maccalfw_remove_event,
-                    "Remove an event given its ID.")
+"""
+Return event details given its ID.
+START is the expected start date which is used to distinguish events with same
+ID.
+
+(fn ID &optional START)
+""")
+        emacs_defun(env, "maccalfw-remove-event", 1, 3, maccalfw_remove_event,
+"""
+Remove an event given its ID.
+START is the expected start date which is used to distinguish events with same
+ID.
+If FUTURE is non-nil, all future events in a recurrent series are removed,
+otherwise only the given event is removed.
+
+(fn ID &optional START FUTURE)
+""")
         emacs_defun(env, "maccalfw-timezones", 0, 0, maccalfw_timezones,
                     "Returns a list of system timezones.")
         emacs_defun(env, "maccalfw-refresh", 0, 0, maccalfw_refresh,
