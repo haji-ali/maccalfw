@@ -408,6 +408,111 @@ Warn if the buffer is modified and offer to save."
           t)
         t))))
 
+(defun maccalfw-event-date-field-pick (widget)
+  "Open date picker to set the value of WIDGET.
+WIDGET defaults to the one at `(point)' if it is for a date.
+Otherwise, the widgets for start time/date are set, unless prefix
+is given or the widget at (point) is for end time/date, in which
+case the end time/date is set."
+  (interactive (list
+                (let ((wid (widget-at)))
+                  (if (and wid
+                           (eq (widget-get wid :value-to-external)
+                               'maccalfw-event--parse-date-field))
+                      wid
+                    (if (or current-prefix-arg
+                            (when-let ((wid (widget-at (point)))
+                                       (key (widget-get wid :field-key)))
+                              (member key '(end-time end-date))))
+                        'end-time
+                      'start-time)))))
+
+  (let ((widgets (maccalfw-event--get-widgets))
+        (for-end-date (eq widget 'end-time)))
+    (if (widgetp widget)
+        (let* ((old-time
+                (maccalfw-event--parse-datetime
+                 "00:00"
+                 (or (widget-value widget)
+                     (maccalfw-event--value
+                      'start-date widgets)))))
+          (widget-value-set widget
+                            (org-read-date
+                             nil nil nil
+                             "Date"
+                             old-time)))
+      (if (widget-get
+           (maccalfw-event--find-widget 'start-time widgets)
+           :inactive)
+          (maccalfw-event-read-only)
+        (let* ((start-time-wid (maccalfw-event--find-widget 'start-time
+                                                            widgets))
+               (start-date-wid (maccalfw-event--find-widget 'start-date
+                                                            widgets))
+               (end-time-wid (maccalfw-event--find-widget 'end-time widgets))
+               (end-date-wid (maccalfw-event--find-widget 'end-date widgets))
+               (all-day-wid (maccalfw-event--find-widget 'all-day widgets))
+               (all-day-p  (widget-value all-day-wid))
+               (start-time
+                (maccalfw-event--parse-datetime
+                 (if all-day-p
+                     "00:00"
+                   (widget-value start-time-wid))
+                 (widget-value start-date-wid)))
+               (end-time
+                (maccalfw-event--parse-datetime
+                 (if all-day-p
+                     "23:59"
+                   (widget-value end-time-wid))
+                 (widget-value end-date-wid)))
+               ;; Define these two to make sure they are bound for
+               ;; `org-read-date'
+               org-time-was-given
+               org-end-time-was-given
+               (new-time (org-read-date
+                          (not (widget-value all-day-wid))
+                          t
+                          nil
+                          (if for-end-date
+                              "End"
+                            "Start")
+                          (if for-end-date
+                              end-time
+                            start-time))))
+          (save-excursion
+            (widget-value-set (if (and for-end-date all-day-p)
+                                  end-date-wid
+                                start-date-wid)
+                              (format-time-string "%F" new-time))
+
+            (when (not for-end-date)
+              ;; Shift end date as well
+              (widget-value-set
+               end-date-wid
+               (format-time-string "%F"
+                                   (time-add new-time
+                                             (* (- (time-to-days end-time)
+                                                   (time-to-days start-time))
+                                                24 60 60)))))
+
+            (when (and (not all-day-p) org-time-was-given)
+              ;; Update time as well
+              (if (or (not for-end-date) org-end-time-was-given)
+                  (progn
+                    (widget-value-set start-time-wid
+                                      (maccalfw-event--format-time new-time))
+                    (widget-value-set
+                     end-time-wid
+                     (or org-end-time-was-given
+                         (maccalfw-event--format-time
+                          (time-add new-time
+                                    (time-subtract end-time
+                                                   start-time))))))
+                ;; for-end-date and range not given
+                (widget-value-set
+                 end-time-wid
+                 (maccalfw-event--format-time new-time))))))))))
+
 (defun maccalfw-event-date-field-pick (for-end-date)
   "Display date picker and assign date fields.
 Sets both start and end dates/times, preserving the duration.
@@ -691,14 +796,14 @@ Assumes time is in the default timezone."
            (plist-get (cdr maccalfw-event--default-timezone) :offset)))
        time))))
 
-(defun maccalfw-event--parse-datetime (date-str time-str &optional timezone)
+(defun maccalfw-event--parse-datetime (time-str date-str &optional timezone)
   "Parse time and return the time in the default-time zone.
 Time is in DATE-STR and TIME-STR is assumed to be in a given
 TIMEZONE."
   (let ((tz (and timezone (alist-get timezone maccalfw-event--timezones
                                      nil nil #'equal)))
         (time (encode-time
-               (parse-time-string (format "%s %s" date-str time-str)))))
+               (parse-time-string (format "%s %s" time-str date-str)))))
     (if tz
         (time-add
          time
@@ -715,9 +820,10 @@ TIMEZONE."
 
 (defun maccalfw-event--parse-integer-list-field (_widget value)
   (unless (string-empty-p value)
+    ;; TODO: This doesn't resolve cases such as "1-2"
     (mapcar
      'string-to-number
-     (string-split value "[^[:digit:]]*" t))))
+     (string-split value "[^-[:digit:]]+" t))))
 
 (defun maccalfw-event--parse-date-field (_widget value)
   (unless (string-empty-p value)
@@ -1106,8 +1212,6 @@ abort `\\[maccalfw-event-kill]'."))
        `(editable-field
          :field-key recurrence-end-date
          :value-to-external maccalfw-event--parse-date-field
-         ;; TODO: Need a better way to set dates so that we can set this one
-         ;; in the same way.
          :keymap maccalfw-event-field-map
          ;; additional space is needed, otherwise :from and :to of the widget
          ;; change as text is added to it
