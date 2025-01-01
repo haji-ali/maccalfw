@@ -184,8 +184,7 @@ extension Dictionary : EmacsCastable where Key == emacs_value?, Value == EmacsCa
 func emacs_funcall(_ env: UnsafeMutablePointer<emacs_env>,
                    _ func_name : emacs_value?,
                    _ args : [emacs_value?]) -> emacs_value? {
-    // Need to change nil to Qnil
-    var arguments = args.map{$0 ?? Qnil}
+    var arguments = args.map{$0 ?? Qnil} // Change nil to Qnil
     let count = arguments.count
     return arguments.withUnsafeMutableBufferPointer{
         bufferPointer in
@@ -253,10 +252,21 @@ func emacs_symbol_to_string(_ env: UnsafeMutablePointer<emacs_env>,
     return nil
 }
 
+func toEmacsVal_plist(_ env: UnsafeMutablePointer<emacs_env>,
+                      _ dict : [String: EmacsCastable?]) -> emacs_value?
+{
+    let quoted_plist =
+      Dictionary(uniqueKeysWithValues:
+                   dict.map {
+                       (emacs_intern(env, $0.key), $0.value) })
+
+    return quoted_plist.filter{$0.value != nil }.toEmacsVal(env)
+}
+
 func fromEmacsVal_plist(_ env: UnsafeMutablePointer<emacs_env>,
-                        _ val: emacs_value?) throws -> [String?: emacs_value] {
+                        _ val: emacs_value?) throws -> [String : emacs_value] {
     let list_data = fromEmacsVal_list(env, val)
-    var result: [String?: emacs_value] = [:]
+    var result: [String: emacs_value] = [:]
 
     for index in stride(from: 0, to: list_data.count, by: 2) {
         if index+1 < list_data.count {

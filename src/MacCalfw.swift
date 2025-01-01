@@ -105,12 +105,7 @@ extension EKEvent : EmacsCastable {
            ":read-only" : self.calendar.allowsContentModifications ? nil : Qt,
            ":url" : self.url?.absoluteString]
 
-        let quoted_plist =
-          Dictionary(uniqueKeysWithValues:
-                       event_plist.map {
-                           (emacs_intern(env, $0.key), $0.value) })
-
-        return quoted_plist.filter{$0.value != nil }.toEmacsVal(env)
+        return toEmacsVal_plist(env, event_plist)make
     }
 }
 
@@ -120,12 +115,7 @@ extension EKRecurrenceDayOfWeek : EmacsCastable {
           [":week-day" : self.dayOfTheWeek,
            ":week-number" : self.weekNumber]
 
-        let quoted_plist =
-          Dictionary(uniqueKeysWithValues:
-                       plist.map {
-                           (emacs_intern(env, $0.key), $0.value) })
-
-        return quoted_plist.filter{$0.value != nil }.toEmacsVal(env)
+        return toEmacsVal_plist(env, plist)
     }
 
     static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
@@ -160,12 +150,7 @@ extension EKRecurrenceRule : EmacsCastable {
            ":year-months": self.monthsOfTheYear as [EmacsCastable?]?,
            ":set-positions": self.setPositions as [EmacsCastable?]?]
 
-        let quoted_plist =
-          Dictionary(uniqueKeysWithValues:
-                       plist.map {
-                           (emacs_intern(env, $0.key), $0.value) })
-
-        return quoted_plist.filter{$0.value != nil }.toEmacsVal(env)
+        return toEmacsVal_plist(env, plist)
     }
 
     static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
