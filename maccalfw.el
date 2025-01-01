@@ -296,7 +296,8 @@ Warn if the buffer is modified and offer to save."
     (quit-window t)))
 
 (defun maccalfw-event-save (&optional duplicate)
-  "Save event."
+  "Save event.
+If DUPLICATE is non-nil, save the event as a new one."
   (interactive "P")
   (let* ((widgets (maccalfw-event--get-widgets))
          (title-wid (maccalfw-event--find-widget 'title widgets))
@@ -318,7 +319,6 @@ Warn if the buffer is modified and offer to save."
                  (maccalfw-event--value 'start-date widgets))
                tz))
          (old-id (unless duplicate (plist-get old-data :id)))
-         future
          (new-data
           (list
            :id old-id
@@ -327,9 +327,10 @@ Warn if the buffer is modified and offer to save."
            :timezone (if all-day "" tz)
            :all-day-p all-day
            :url (maccalfw-event--value 'url widgets)
-           ;; TODO: passing (nil) here crashes emacs!
-           :recurrence (when (maccalfw-event--value 'recurrence-p widgets)
-                          (list (maccalfw-event--value 'recurrence widgets)))
+           :recurrence (when (recur
+                              (maccalfw-event--value 'recurrence-p
+                                                     widgets))
+                         (list recur))
            :location (maccalfw-event--value 'location widgets)
            :availability (maccalfw-event--value 'availability widgets)
            :notes (maccalfw-event--value 'notes widgets)))
@@ -363,18 +364,17 @@ Warn if the buffer is modified and offer to save."
       (setq new-data
             (plist-put new-data :id old-id)))
     (if new-data
-        (progn
-          ;; if old event has a recurrence, check with use if all future events
-          ;; should be editied or just the current one
-          (setq fututre
-                (and (or (plist-get old-data :recurrence)
-                         (plist-get new-data :recurrence))
-                     ;; TODO: Need to properly compare recurrence rules, if
-                     ;; different then we should modify all future events If
-                     ;; equal, then we should ask the use
-                     (or (not (equal (plist-get new-data :recurrence)
-                                     (plist-get old-data :recurrence)))
-                         (maccalfw-event-modify-future-events-p))))
+        ;; if old event has a recurrence, check with use if all future events
+        ;; should be editied or just the current one
+        (let ((future
+               (and (or (plist-get old-data :recurrence)
+                        (plist-get new-data :recurrence))
+                    ;; TODO: Need to properly compare recurrence rules, if
+                    ;; different then we should modify all future events if
+                    ;; equal, then we should ask the user
+                    (or (not (equal (plist-get new-data :recurrence)
+                                    (plist-get old-data :recurrence)))
+                        (maccalfw-event-modify-future-events-p)))))
           (widget-put title-wid
                       :event-data
                       (maccalfw-update-event new-data future))
@@ -513,83 +513,6 @@ case the end time/date is set."
                  end-time-wid
                  (maccalfw-event--format-time new-time))))))))))
 
-(defun maccalfw-event-date-field-pick (for-end-date)
-  "Display date picker and assign date fields.
-Sets both start and end dates/times, preserving the duration.
-If FOR-END-DATE is non-nil, set the end-date only."
-  (interactive (list
-                (or current-prefix-arg
-                    (when-let ((wid (widget-at (point)))
-                               (key (widget-get wid :field-key)))
-                      (member key '(end-time end-date))))))
-  (let ((widgets (maccalfw-event--get-widgets)))
-    (if (widget-get (maccalfw-event--find-widget 'start-time widgets)
-                    :inactive)
-        (maccalfw-event-read-only)
-      (let* ((start-time-wid (maccalfw-event--find-widget 'start-time widgets))
-             (start-date-wid (maccalfw-event--find-widget 'start-date widgets))
-             (end-time-wid (maccalfw-event--find-widget 'end-time widgets))
-             (end-date-wid (maccalfw-event--find-widget 'end-date widgets))
-             (all-day-wid (maccalfw-event--find-widget 'all-day widgets))
-             (all-day-p  (widget-value all-day-wid))
-             (start-time
-              (maccalfw-event--parse-datetime
-               (if all-day-p
-                   "00:00"
-                 (widget-value start-time-wid))
-               (widget-value start-date-wid)))
-             (end-time
-              (maccalfw-event--parse-datetime
-               (if all-day-p
-                   "23:59"
-                 (widget-value end-time-wid))
-               (widget-value end-date-wid)))
-             ;; Define these two to make sure they are bound for `org-read-date'
-             org-time-was-given
-             org-end-time-was-given
-             (new-time (org-read-date
-                        (not (widget-value all-day-wid))
-                        t
-                        nil
-                        (if for-end-date
-                            "End"
-                          "Start")
-                        (if for-end-date
-                            end-time
-                          start-time))))
-        (save-excursion
-          (widget-value-set (if (and for-end-date all-day-p)
-                                end-date-wid
-                              start-date-wid)
-                            (format-time-string "%F" new-time))
-
-          (when (not for-end-date)
-            ;; Shift end date as well
-            (widget-value-set
-             end-date-wid
-             (format-time-string "%F"
-                                 (time-add new-time
-                                           (* (- (time-to-days end-time)
-                                                 (time-to-days start-time))
-                                              24 60 60)))))
-
-          (when (and (not all-day-p) org-time-was-given)
-            ;; Update time as well
-            (if (or (not for-end-date) org-end-time-was-given)
-                (progn
-                  (widget-value-set start-time-wid
-                                    (maccalfw-event--format-time new-time))
-                  (widget-value-set
-                   end-time-wid
-                   (or org-end-time-was-given
-                       (maccalfw-event--format-time
-                        (time-add new-time
-                                  (time-subtract end-time
-                                                 start-time))))))
-              ;; for-end-date and range not given
-              (widget-value-set end-time-wid
-                                (maccalfw-event--format-time new-time)))))))))
-
 (defun maccalfw-event-open (event)
   "Open a buffer to display the details of EVENT."
   (pop-to-buffer (generate-new-buffer "*calender event*"))
@@ -656,7 +579,7 @@ EVENT-DATA contains the initial event information."
   "Return non-nil if modification should affect all future events.
 Check the value of the variable
 `maccalfw-event-modify-future-events-p', and potentially prompt
-the user."
+the user, displaying the message PROMPT."
   (if (eq maccalfw-event-modify-future-events-p 'ask)
       (let ((response
              (cadr
@@ -815,10 +738,12 @@ TIMEZONE."
       time)))
 
 (defun maccalfw-event--parse-integer-field (_widget value)
+  "Parse VALUE of WIDGET as an integer."
   (unless (string-empty-p value)
     (string-to-number value)))
 
 (defun maccalfw-event--parse-integer-list-field (_widget value)
+  "Parse VALUE of WIDGET as a list of integers delimited by non-numbers."
   (unless (string-empty-p value)
     ;; TODO: This doesn't resolve cases such as "1-2"
     (mapcar
@@ -826,8 +751,9 @@ TIMEZONE."
      (string-split value "[^-[:digit:]]+" t))))
 
 (defun maccalfw-event--parse-date-field (_widget value)
-  (unless (string-empty-p value)
-    (encode-time (parse-time-string value))))
+  "Parse VALUE of WIDGET as a date."
+  mi(unless (string-empty-p value)
+    (parse-time-string value)))
 
 (defun maccalfw-event--timezone-widget-notify (widget &rest _)
   "Action for timezone action.
@@ -1084,22 +1010,24 @@ abort `\\[maccalfw-event-kill]'."))
        :field-key 'recurrence
        :value-to-external
        (lambda (widget _value)
-         (cl-loop for child in (widget-get widget :children)
-                  for field-key = (widget-get child :field-key)
-                  for value = nil
-                  when (and field-key
-                            (not (widget-get child :do-not-save))
-                            ;; If it's hidden, it shouldn't be part of the
-                            ;; value.
-                            (not (widget-get child :hidden)))
-                  for value = (widget-value child)
-                  when value
-                  nconc
-                  (list
-                   (intern (concat ":" (string-trim-left
-                                        (symbol-name field-key)
-                                        "recurrence-")))
-                   value)))
+         (unless (widget-get widget :hidden)
+           (cl-loop
+            with value = nil
+            for child in (widget-get widget :children)
+            for field-key = (widget-get child :field-key)
+            when (and field-key
+                      (not (widget-get child :do-not-save))
+                      ;; If it's hidden, it shouldn't be part of the
+                      ;; value.
+                      (not (widget-get child :hidden)))
+            do (setq value (widget-value child))
+            and when value
+            nconc
+            (list
+             (intern (concat ":" (string-trim-left
+                                  (symbol-name field-key)
+                                  "recurrence-")))
+             value))))
        :indent 3
        `(editable-field
          :field-key recurrence-interval
@@ -1138,7 +1066,6 @@ abort `\\[maccalfw-event-kill]'."))
           :indent 3
           :format "on %v\n"
           :inline t
-          ;; TODO: How do we handle :week-number?
           :value ,(cl-loop for day in (plist-get recur :week-days)
                            collect (plist-get day :week-day)))
         (cl-loop
@@ -1232,8 +1159,10 @@ abort `\\[maccalfw-event-kill]'."))
                 (format "%d" occurrence-count))
               ""))
 
-       ;; TODO: set-positions.
-       ;; TODO: week-first-day? Indicates which day of the week the recurrence
+       ;; TODO: Unimplemented features:
+       ;; - How do we handle :week-number?
+       ;; - set-positions.
+       ;; - week-first-day? Indicates which day of the week the recurrence
        ;; rule treats as the first day of the week.
        ))
 

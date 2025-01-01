@@ -34,7 +34,7 @@ func toEmacsVal_Enum<T : Hashable>
    _ map: [T: String],
    _ t : T) -> emacs_value? {
     if let emacsString = map[t] {
-        return env.pointee.intern(env, emacsString)
+        return emacs_intern(env, emacsString)
     }
     return nil
 }
@@ -44,7 +44,7 @@ func fromEmacsVal_Enum<T : Hashable>
    _ map: [T: String],
    _ v: emacs_value?) throws -> T {
     guard let key = try emacs_symbol_to_string(env, v) else {
-        throw EmacsError.wrong_type_argument("Invalid symbol")
+        throw EmacsError.wrong_type_argument("Invalid key")
     }
 
     if let enumvalue = map.first(where: { $0.value == key })?.key {
@@ -69,8 +69,8 @@ extension Int  : EmacsCastable {
     }
 
     static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
-                             _ val : emacs_value?) throws -> Self? {
-        if let val, env.pointee.is_not_nil(env, val) {
+                             _ val : emacs_value?) -> Self? {
+        if let val, is_not_nil(env, val) {
             return env.pointee.extract_integer(env, val);
         }
         else {
@@ -87,7 +87,7 @@ extension Bool : EmacsCastable {
 
     static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
                              _ val : emacs_value?) throws -> Self {
-        return env.pointee.is_not_nil(env, val)
+        return is_not_nil(env, val)
     }
 }
 
@@ -104,7 +104,7 @@ extension String : EmacsCastable {
 
     static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
                              _ val : emacs_value?) throws -> Self? {
-        if let val, env.pointee.is_not_nil(env, val) {
+        if let val, is_not_nil(env, val) {
             var size: Int = 0
             if !env.pointee.copy_string_contents(env, val, nil, &size) {
                 return nil
@@ -139,7 +139,7 @@ extension Date : EmacsCastable {
     static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
                              _ val : emacs_value?) throws -> Date? {
         // val should be a list of 3 elements having day, month and year.
-        if let val, env.pointee.is_not_nil(env, val) {
+        if let val, is_not_nil(env, val) {
             let time = env.pointee.extract_time(env, val)
             let timeInterval = TimeInterval(time.tv_sec) + TimeInterval(time.tv_nsec) / 1_000_000_000
             return Date(timeIntervalSince1970: timeInterval)
@@ -156,7 +156,7 @@ extension Array : EmacsCastable where Element == EmacsCastable?  {
         let count = arguments.count
         return arguments.withUnsafeMutableBufferPointer{
             bufferPointer in
-            env.pointee.funcall(env, env.pointee.intern(env, "list"),
+            env.pointee.funcall(env, emacs_intern(env, "list"),
                                 count,
                                 bufferPointer.baseAddress!)
         }
@@ -184,7 +184,8 @@ extension Dictionary : EmacsCastable where Key == emacs_value?, Value == EmacsCa
 func emacs_funcall(_ env: UnsafeMutablePointer<emacs_env>,
                    _ func_name : emacs_value?,
                    _ args : [emacs_value?]) -> emacs_value? {
-    var arguments = args
+    // Need to change nil to Qnil
+    var arguments = args.map{$0 ?? Qnil}
     let count = arguments.count
     return arguments.withUnsafeMutableBufferPointer{
         bufferPointer in
@@ -201,8 +202,8 @@ func emacs_defun(_ env: UnsafeMutablePointer<emacs_env>,
                  _ fun: EmacsDefunCallback,
                  _ doc : String?) {
     // TODO Should we be careful with passing strings here?
-    let internSymbol = env.pointee.intern(env, "defalias")
-    let functionName = env.pointee.intern(env, name)
+    let internSymbol = emacs_intern(env, "defalias")
+    let functionName = emacs_intern(env, name)
     let function = env.pointee.make_function(env, min, max, fun,
                                              doc, nil)
 
@@ -225,7 +226,7 @@ func emacs_cons(_ env: UnsafeMutablePointer<emacs_env>,
     var arguments: [emacs_value?] = [a, b]
     return arguments.withUnsafeMutableBufferPointer{
         bufferPointer in
-        env.pointee.funcall(env, env.pointee.intern(env, "cons"), 2,
+        env.pointee.funcall(env, emacs_intern(env, "cons"), 2,
                             bufferPointer.baseAddress!)
     }
 }
@@ -234,9 +235,9 @@ func fromEmacsVal_list(_ env: UnsafeMutablePointer<emacs_env>,
                       _ val: emacs_value?) -> [emacs_value?] {
     var ret: [emacs_value?] = []
     var cdr: emacs_value? = val
-    let Qcar = env.pointee.intern(env, "car")
-    let Qcdr = env.pointee.intern(env, "cdr")
-    while (env.pointee.is_not_nil(env, cdr)) {
+    let Qcar = emacs_intern(env, "car")
+    let Qcdr = emacs_intern(env, "cdr")
+    while (is_not_nil(env, cdr)) {
         ret.append(emacs_funcall(env, Qcar, [cdr]))
         cdr = emacs_funcall(env, Qcdr, [cdr])
     }
@@ -245,14 +246,17 @@ func fromEmacsVal_list(_ env: UnsafeMutablePointer<emacs_env>,
 
 func emacs_symbol_to_string(_ env: UnsafeMutablePointer<emacs_env>,
                             _ val: emacs_value?) throws -> String? {
-    let Qsymbol_name = env.pointee.intern(env, "symbol-name")
-    return try String.fromEmacsVal(env,emacs_funcall(env, Qsymbol_name, [val]))
+    if let val {
+        let Qsymbol_name = emacs_intern(env, "symbol-name")
+        return try String.fromEmacsVal(env,emacs_funcall(env, Qsymbol_name, [val]))
+    }
+    return nil
 }
 
 func fromEmacsVal_plist(_ env: UnsafeMutablePointer<emacs_env>,
-                       _ val: emacs_value?) throws -> [String?: emacs_value?] {
+                        _ val: emacs_value?) throws -> [String?: emacs_value] {
     let list_data = fromEmacsVal_list(env, val)
-    var result: [String?: emacs_value?] = [:]
+    var result: [String?: emacs_value] = [:]
 
     for index in stride(from: 0, to: list_data.count, by: 2) {
         if index+1 < list_data.count {
@@ -272,7 +276,7 @@ func emacs_error(_ env: UnsafeMutablePointer<emacs_env>,
                  _ symbol: String,
                  _ msg : String? = nil) {
     env.pointee.non_local_exit_signal(
-      env, env.pointee.intern(env, symbol),
+      env, emacs_intern(env, symbol),
       ([msg]).toEmacsVal(env));
 }
 
@@ -289,4 +293,24 @@ func emacs_process_error(_ env: UnsafeMutablePointer<emacs_env>,
     else {
         emacs_error(env, "error", "Unexpected error: \(error.localizedDescription)")
     }
+}
+
+
+extension NSNumber  : EmacsCastable {
+    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+        return env.pointee.make_integer(env, self.intValue)
+    }
+}
+
+func emacs_intern(_ env: UnsafeMutablePointer<emacs_env>,
+                  _ symbol: String) -> emacs_value? {
+    return env.pointee.intern(env, symbol)
+}
+
+func is_not_nil(_ env: UnsafeMutablePointer<emacs_env>,
+                _ val: emacs_value?) -> Bool {
+    if let val{
+        return env.pointee.is_not_nil(env, val)
+    }
+    return true
 }
