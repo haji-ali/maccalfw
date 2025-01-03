@@ -36,11 +36,11 @@
 
 ;;; Code:
 
+;; TODO Weekly events with days don't work!
+
 (require 'calfw)
 (require 'wid-edit)
 (require 'org)
-
-;; TODO: Modifying events with recurrence doesn't work!
 
 (defcustom maccalfw-event-save-hook nil
   "Hook called when an event is saved successfully.
@@ -295,6 +295,44 @@ Warn if the buffer is modified and offer to save."
     (set-buffer-modified-p nil)
     (quit-window t)))
 
+(cl-defun maccalfw--diff-plist (A B
+                                  &key
+                                  symmetric
+                                  test
+                                  test-plist)
+  "Compare plists A and B and return differing properties.
+If SYMMETRIC t, return properties in B not in A. TEST-PLIST is a
+plist mapping property names to comparison functions, or defaults
+to TEST or \\='eq for all properties. Returns a cons of A and B
+values which are different, or nil if no values are different."
+  (let ((test (or test 'eq))
+        (result-A nil)
+        (result-B nil)
+        (AA A))
+    ;; Process A
+    (while A
+      (let* ((key (car A))
+             (value-a (cadr A))
+             (value-b (plist-get B key))
+             (cmp (or (plist-get test-plist key) test)))
+        (unless (funcall cmp value-a value-b)
+          (setq result-A (append result-A (list key value-a)))
+          (setq result-B (append result-B (list key value-b)))))
+      (setq A (cddr A)))
+    ;; Process B for keys not in A
+    (while (and symmetric B)
+      (let* ((key (car B))
+             (value-b (cadr B))
+             (cmp (or (plist-get test-plist key) test)))
+        (unless (or (plist-get AA key) ;; was processed already
+                    (funcall cmp nil value-b))
+          (setq result-A (append result-A (list key nil)))
+          (setq result-B (append result-B (list key value-b)))))
+      (setq B (cddr B)))
+    (if (or result-A result-B)
+        (list result-A result-B)
+      nil)))
+
 (defun maccalfw-event-save (&optional duplicate)
   "Save event.
 If DUPLICATE is non-nil, save the event as a new one."
@@ -327,32 +365,50 @@ If DUPLICATE is non-nil, save the event as a new one."
            :timezone (if all-day "" tz)
            :all-day-p all-day
            :url (maccalfw-event--value 'url widgets)
-           :recurrence (when (recur
-                              (maccalfw-event--value 'recurrence-p
-                                                     widgets))
-                         (list recur))
+           :recurrence (when (maccalfw-event--value 'recurrence-p widgets)
+                         (list (maccalfw-event--value 'recurrence widgets)))
            :location (maccalfw-event--value 'location widgets)
            :availability (maccalfw-event--value 'availability widgets)
            :notes (maccalfw-event--value 'notes widgets)))
+         (new-all-data new-data)
          (new-event (null old-id)))
     (when (plist-get old-data :read-only)
       (user-error "Event is not editable.?"))
 
-    ;; Only keep old-data
-    (setq new-data
-          (cl-flet ((str-null-p (x)
-                      (if (stringp x) (string= x "") (null x))))
-            (cl-loop for (key val) on new-data by #'cddr
-                     for old-val = (plist-get old-data key)
-                     when (or
-                           (and new-event val
-                                (not (str-null-p val)))
-                           (and (not new-event)
-                                (or
-                                 (and (str-null-p val) old-val)
-                                 (and (not (str-null-p val))
-                                      (not (equal val old-val))))))
-                     append (list key val))))
+    ;; Only keep modified data
+    (cl-flet ((str-null-p (x)
+                (if (stringp x) (string= x "") (null x))))
+      (setq new-data
+            (car
+             (maccalfw--diff-plist
+              new-data
+              old-data
+              :test (lambda (x y)
+                      ;; If there's no old event, then as long as x is
+                      ;; non-nil, consider it unique.
+                      ;; If there's an old event, then consider it unique
+                      ;; Either x is nil (or empty) and y is not nil.
+                      ;; or x is not nil (nor empty) and different
+                      ;; from y.
+                      (and
+                       (or (not new-event) (str-null-p x))
+                       (or new-event
+                           (and (or (not (str-null-p x)) (not y))
+                                (or (str-null-p x) (equal x y))))))
+              :test-plist `(:recurrence
+                            ,(lambda (x y)
+                               (not (maccalfw--diff-plist
+                                     (car-safe x)
+                                     (car-safe y)
+                                     :test 'seq-set-equal-p
+                                     :test-plist
+                                     '(;
+                                       ;; ignore this value
+                                       :week-first-day always
+                                       :end-date equal
+                                       :occurrence-count eq
+                                       :interval eq
+                                       :frequency eq)))))))))
     (unless (and (not new-event)
                  (time-equal-p start (plist-get old-data :start)))
       (setq new-data (plist-put new-data :start start)))
@@ -369,15 +425,15 @@ If DUPLICATE is non-nil, save the event as a new one."
         (let ((future
                (and (or (plist-get old-data :recurrence)
                         (plist-get new-data :recurrence))
-                    ;; TODO: Need to properly compare recurrence rules, if
-                    ;; different then we should modify all future events if
-                    ;; equal, then we should ask the user
-                    (or (not (equal (plist-get new-data :recurrence)
-                                    (plist-get old-data :recurrence)))
+                    ;; If changing recurrence rule, then we should modify all
+                    ;; future events. Otherwise, we should ask the user
+                    (or (plist-get new-data :recurrence)
                         (maccalfw-event-modify-future-events-p)))))
           (widget-put title-wid
                       :event-data
-                      (maccalfw-update-event new-data future))
+                      (maccalfw-update-event new-data
+                                             (plist-get old-data :start)
+                                             future))
           (when (called-interactively-p 'interactive)
             (message "Event saved."))
           (run-hook-with-args
@@ -752,7 +808,7 @@ TIMEZONE."
 
 (defun maccalfw-event--parse-date-field (_widget value)
   "Parse VALUE of WIDGET as a date."
-  mi(unless (string-empty-p value)
+  (unless (string-empty-p value)
     (parse-time-string value)))
 
 (defun maccalfw-event--timezone-widget-notify (widget &rest _)
@@ -869,12 +925,12 @@ abort `\\[maccalfw-event-kill]'."))
     (widget-insert "\n\n")
 
     (widget-create 'editable-field
-     :field-key 'title
-     :event-data event
-     :keymap maccalfw-event-field-map
-     :value-face 'maccalfw-event-title-field
-     :format "%v \n" ; Text after the field!
-     (or (plist-get event :title) ""))
+                   :field-key 'title
+                   :event-data event
+                   :keymap maccalfw-event-field-map
+                   :value-face 'maccalfw-event-title-field
+                   :format "%v \n" ; Text after the field!
+                   (or (plist-get event :title) ""))
 
     (let* ((cals (maccalfw-get-calendars))
            (options (cl-loop
@@ -906,45 +962,45 @@ abort `\\[maccalfw-event-kill]'."))
        options))
 
     (widget-create 'editable-field
-     :field-key 'start-date
-     :keymap maccalfw-event-field-map
-     :format " %v "
-     :size 10
-     (and event
-          (format-time-string "%F"
-                              (plist-get event :start))))
+                   :field-key 'start-date
+                   :keymap maccalfw-event-field-map
+                   :format " %v "
+                   :size 10
+                   (and event
+                        (format-time-string "%F"
+                                            (plist-get event :start))))
 
     (widget-create 'editable-field
-     :field-key 'end-date
-     :keymap maccalfw-event-field-map
-     :format "  --    %v   "
-     :size 10
-     (format-time-string "%F"
-                         (plist-get event :end)))
+                   :field-key 'end-date
+                   :keymap maccalfw-event-field-map
+                   :format "  --    %v   "
+                   :size 10
+                   (format-time-string "%F"
+                                       (plist-get event :end)))
     (widget-create 'editable-field
-     :field-key 'start-time
-     :keymap maccalfw-event-field-map
-     :format " %v -- "
-     :size 6
-     (maccalfw-event--format-time
-      (plist-get event :start)
-      timezone))
+                   :field-key 'start-time
+                   :keymap maccalfw-event-field-map
+                   :format " %v -- "
+                   :size 6
+                   (maccalfw-event--format-time
+                    (plist-get event :start)
+                    timezone))
     (widget-create 'editable-field
-     :field-key 'end-time
-     :keymap maccalfw-event-field-map
-     :format " %v   "
-     :size 6
-     (maccalfw-event--format-time
-      (plist-get event :end)
-      timezone))
+                   :field-key 'end-time
+                   :keymap maccalfw-event-field-map
+                   :format " %v   "
+                   :size 6
+                   (maccalfw-event--format-time
+                    (plist-get event :end)
+                    timezone))
     (widget-create 'checkbox
-     :field-key 'all-day
-     :format " %[%v%] All day\n\n"
-     :notify #'maccalfw-event--hs-action
-     :hs (maccalfw-event--checkbox-hs
-          'end-date
-          '(start-time end-time timezone))
-     (plist-get event :all-day-p))
+                   :field-key 'all-day
+                   :format " %[%v%] All day\n\n"
+                   :notify #'maccalfw-event--hs-action
+                   :hs (maccalfw-event--checkbox-hs
+                        'end-date
+                        '(start-time end-time timezone))
+                   (plist-get event :all-day-p))
 
     (unless maccalfw-event--timezones
       (setq
@@ -977,7 +1033,6 @@ abort `\\[maccalfw-event-kill]'."))
      'radio-button-choice
      :field-key 'availability
      :entry-format "%b %v "
-     :inline t
      :format "%v\n\n"
      :value (or (plist-get event :availability) 'busy)
      '(item :format "%[Tentative%] " :value tentative)
@@ -995,7 +1050,148 @@ abort `\\[maccalfw-event-kill]'."))
       "%v\n")
      (or (plist-get event :location) ""))
 
-    (let* ((recur (car-safe (plist-get event :recurrence))))
+    (let* ((recur (car-safe (plist-get event :recurrence)))
+           (group-items
+            (list
+             `(editable-field
+               :field-key recurrence-interval
+               :value-to-external maccalfw-event--parse-integer-field
+               :keymap maccalfw-event-field-map
+               :format "every %v "
+               :size 5
+               ,(or (when-let (interval
+                               (plist-get recur :interval))
+                      (format "%d" interval))
+                    "1"))
+
+             `(radio-button-choice
+               :field-key recurrence-frequency
+               :entry-format "%b %v"
+               :format "%v\n"
+               :hs ((weekly . recurrence-weekdays)
+                    (monthly recurrence-weekdays
+                             recurrence-month-days)
+                    (yearly recurrence-weekdays
+                            recurrence-year-months
+                            recurrence-year-weeks
+                            recurrence-year-days))
+               :notify maccalfw-event--hs-action
+               :value ,(or (plist-get recur :frequency)
+                           'weekly)
+               (item :format "%[Day%] " :value daily)
+               (item :format "%[Week%] " :value weekly)
+               (item :format "%[Month%] " :value monthly)
+               (item :format "%[Year%] " :value yearly))
+
+             (append
+              `(checklist
+                :field-key recurrence-weekdays
+                :indent 3
+                :format "on %v\n"
+                :value ,(cl-loop for day in (plist-get recur :week-days)
+                                 collect (plist-get day :week-day)))
+              (cl-loop
+               with lst = '(sunday monday tuesday wednesday thursday friday
+                                   saturday)
+               for w in lst
+               collect `(item :format "%t "
+                              :tag ,(capitalize (substring (symbol-name w) 0 3))
+                              ,w)))
+
+             `(editable-field
+               :field-key recurrence-month-days
+               :value-to-external maccalfw-event--parse-integer-list-field
+               :keymap maccalfw-event-field-map
+               :format "on days of month [-31 to 31]: %v\n"
+               :size 10
+               ,(or (when-let (mdays (plist-get recur :month-days))
+                      (string-join (cl-loop for i in mdays
+                                            collect (number-to-string i))
+                                   ", "))
+                    ""))
+             (append
+              `(checklist
+                :field-key recurrence-year-months
+                :format "on %v\n"
+                :value ,(plist-get recur :year-months))
+              (cl-loop
+               with lst = parse-time-months
+               with len = (1+ (length lst))
+               for w in lst
+               for idx from 0
+               while (< idx (/ len 2))
+               collect `(item :format "%t "
+                              :tag ,(capitalize (car w))
+                              ,(cdr w))))
+             `(editable-field
+               :field-key recurrence-year-weeks
+               :value-to-external maccalfw-event--parse-integer-list-field
+               :keymap maccalfw-event-field-map
+               :format "on weeks of year [-53 to 53]: %v\n"
+               :size 10
+               ,(or (when-let (mdays (plist-get recur :year-weeks))
+                      (string-join (cl-loop for i in mdays
+                                            collect (number-to-string i))
+                                   ", "))
+                    ""))
+             `(editable-field
+               :field-key recurrence-year-days
+               :value-to-external maccalfw-event--parse-integer-list-field
+               :keymap maccalfw-event-field-map
+               :format "on days of year [-366 to 366]: %v\n"
+               :size 10
+               ,(or (when-let (mdays (plist-get recur :year-days))
+                      (string-join (cl-loop for i in mdays
+                                            collect (number-to-string i))
+                                   ", "))
+                    ""))
+             `(radio-button-choice
+               :field-key recurrence-end-rule
+               :do-not-save t
+               :entry-format "%b %v"
+               :format "%v"
+               :hs ((on . recurrence-end-date)
+                    (after . recurrence-occurrence-count))
+               :notify maccalfw-event--hs-action
+               :value ,(or (and (plist-get recur :end-date) 'on)
+                           (and (plist-get recur :occurrence-count) 'after))
+               (item :format "%[Until%] " :value on)
+               (item :format "%[After%] " :value after))
+
+             `(editable-field
+               :field-key recurrence-end-date
+               :value-to-external maccalfw-event--parse-date-field
+               :keymap maccalfw-event-field-map
+               ;; additional space is needed, otherwise :from and :to of the widget
+               ;; change as text is added to it
+               :format " %v "
+               :size 10
+               ,(or (when-let (end-date (plist-get recur :end-date))
+                      (format-time-string "%F" end-date))
+                    ""))
+
+             `(editable-field
+               :field-key recurrence-occurrence-count
+               :value-to-external maccalfw-event--parse-integer-field
+               :keymap maccalfw-event-field-map
+               :format " %v occurrences"
+               :size 5
+               ,(or (when-let (occurrence-count
+                               (plist-get recur :occurrence-count))
+                      (format "%d" occurrence-count))
+                    ""))
+             ;; TODO: Unimplemented features:
+             ;; - How do we handle :week-number?
+             ;; - set-positions.
+             ;; - week-first-day? Indicates which day of the week the recurrence
+             ;; rule treats as the first day of the week.
+             ))
+           (group-value
+            (cl-loop for x in group-items
+                     collect
+                     (if (eq (car x) 'editable-field)
+                         (car (last x))
+                       (plist-get (cdr x) :value)))))
       (widget-create
        'checkbox
        :field-key 'recurrence-p
@@ -1004,167 +1200,39 @@ abort `\\[maccalfw-event-kill]'."))
        :hs (maccalfw-event--checkbox-hs 'recurrence)
        (plist-get event :recurrence))
 
-      (widget-create
-       'group
-       :format (concat (propertize ":" 'display "") "%v")
-       :field-key 'recurrence
-       :value-to-external
-       (lambda (widget _value)
-         (unless (widget-get widget :hidden)
-           (cl-loop
-            with value = nil
-            for child in (widget-get widget :children)
-            for field-key = (widget-get child :field-key)
-            when (and field-key
-                      (not (widget-get child :do-not-save))
-                      ;; If it's hidden, it shouldn't be part of the
-                      ;; value.
-                      (not (widget-get child :hidden)))
-            do (setq value (widget-value child))
-            and when value
-            nconc
-            (list
-             (intern (concat ":" (string-trim-left
-                                  (symbol-name field-key)
-                                  "recurrence-")))
-             value))))
-       :indent 3
-       `(editable-field
-         :field-key recurrence-interval
-         :value-to-external maccalfw-event--parse-integer-field
-         :keymap maccalfw-event-field-map
-         :format "every %v "
-         :size 5
-         ,(or (when-let (interval
-                         (plist-get recur :interval))
-                (format "%d" interval))
-              "1"))
-
-       `(radio-button-choice
-         :field-key recurrence-frequency
-         :entry-format "%b %v"
-         :inline t
-         :format "%v\n"
-         :hs ((weekly . recurrence-weekdays)
-              (monthly recurrence-weekdays
-                       recurrence-month-days)
-              (yearly recurrence-weekdays
-                      recurrence-year-months
-                      recurrence-year-weeks
-                      recurrence-year-days))
-         :notify maccalfw-event--hs-action
-         :value ,(or (plist-get recur :frequency)
-                     'weekly)
-         (item :format "%[Day%] " :value daily)
-         (item :format "%[Week%] " :value weekly)
-         (item :format "%[Month%] " :value monthly)
-         (item :format "%[Year%] " :value yearly))
-
-       (append
-        `(checklist
-          :field-key recurrence-weekdays
-          :indent 3
-          :format "on %v\n"
-          :inline t
-          :value ,(cl-loop for day in (plist-get recur :week-days)
-                           collect (plist-get day :week-day)))
-        (cl-loop
-         with lst = '(sunday monday tuesday wednesday thursday friday
-                             saturday)
-         for w in lst
-         collect `(item :format "%t "
-                        :tag ,(capitalize (substring (symbol-name w) 0 3))
-                        ,w)))
-
-       `(editable-field
-         :field-key recurrence-month-days
-         :value-to-external maccalfw-event--parse-integer-list-field
-         :keymap maccalfw-event-field-map
-         :format "on days of month [-31 to 31]: %v\n"
-         :size 10
-         ,(or (when-let (mdays (plist-get recur :month-days))
-                (string-join (cl-loop for i in mdays
-                                      collect (number-to-string i))
-                             ", "))
-              ""))
-       (append
-        '(checklist
-          :field-key recurrence-year-months
-          :format "on %v\n"
-          :value (plist-get recur :year-months))
-        (cl-loop
-         with lst = parse-time-months
-         with len = (1+ (length lst))
-         for w in lst
-         for idx from 0
-         while (< idx (/ len 2))
-         collect `(item :format "%t "
-                        :tag ,(capitalize (car w))
-                        ,(cdr w))))
-       `(editable-field
-         :field-key recurrence-year-weeks
-         :value-to-external maccalfw-event--parse-integer-list-field
-         :keymap maccalfw-event-field-map
-         :format "on weeks of year [-53 to 53]: %v\n"
-         :size 10
-         ,(or (when-let (mdays (plist-get recur :year-weeks))
-                (string-join (cl-loop for i in mdays
-                                      collect (number-to-string i))
-                             ", "))
-              ""))
-       `(editable-field
-         :field-key recurrence-year-days
-         :value-to-external maccalfw-event--parse-integer-list-field
-         :keymap maccalfw-event-field-map
-         :format "on days of year [-366 to 366]: %v\n"
-         :size 10
-         ,(or (when-let (mdays (plist-get recur :year-days))
-                (string-join (cl-loop for i in mdays
-                                      collect (number-to-string i))
-                             ", "))
-              ""))
-       `(radio-button-choice
-         :field-key recurrence-end-rule
-         :do-not-save t
-         :entry-format "%b %v"
-         :format "%v"
-         :hs ((on . recurrence-end-date)
-              (after . recurrence-occurrence-count))
-         :notify maccalfw-event--hs-action
-         :value ,(or (and (plist-get recur :end-date) 'on)
-                     (and (plist-get recur :occurrence-count) 'after))
-         (item :format "%[Until%] " :value on)
-         (item :format "%[After%] " :value after))
-
-       `(editable-field
-         :field-key recurrence-end-date
-         :value-to-external maccalfw-event--parse-date-field
-         :keymap maccalfw-event-field-map
-         ;; additional space is needed, otherwise :from and :to of the widget
-         ;; change as text is added to it
-         :format " %v "
-         :size 10
-         ,(or (when-let (end-date (plist-get recur :end-date))
-                (format-time-string "%F" end-date))
-              ""))
-
-       `(editable-field
-         :field-key recurrence-occurrence-count
-         :value-to-external maccalfw-event--parse-integer-field
-         :keymap maccalfw-event-field-map
-         :format " %v occurrences"
-         :size 5
-         ,(or (when-let (occurrence-count
-                         (plist-get recur :occurrence-count))
-                (format "%d" occurrence-count))
-              ""))
-
-       ;; TODO: Unimplemented features:
-       ;; - How do we handle :week-number?
-       ;; - set-positions.
-       ;; - week-first-day? Indicates which day of the week the recurrence
-       ;; rule treats as the first day of the week.
-       ))
+      (apply 'widget-create
+             'group
+             :format (concat (propertize ":" 'display "") "%v")
+             :field-key 'recurrence
+             :value-to-external
+             (lambda (widget _value)
+               (unless (widget-get widget :hidden)
+                 (cl-loop
+                  with value = nil
+                  for child in (widget-get widget :children)
+                  for field-key = (widget-get child :field-key)
+                  when (and field-key
+                            (not (widget-get child :do-not-save))
+                            ;; If it's hidden, it shouldn't be part of the
+                            ;; value.
+                            (not (widget-get child :hidden)))
+                  do (setq value (widget-value child))
+                  and when value
+                  nconc
+                  (list
+                   (intern (concat ":" (string-trim-left
+                                        (symbol-name field-key)
+                                        "recurrence-")))
+                   value))))
+             :indent 3
+             ;; TODO: this doesn't work for some reason
+             ;;
+             ;; We have to set the group value here because otherwise the
+             ;; checklists are not set correctly. This is because the group
+             ;; value is nil by default which leads to resetting of all
+             ;; checklists. See bug#75171
+             :value group-value
+             group-items))
 
     (when-let (stat (plist-get event :status))
       (widget-insert

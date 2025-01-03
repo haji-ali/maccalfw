@@ -105,7 +105,7 @@ extension EKEvent : EmacsCastable {
            ":read-only" : self.calendar.allowsContentModifications ? nil : Qt,
            ":url" : self.url?.absoluteString]
 
-        return toEmacsVal_plist(env, event_plist)make
+        return toEmacsVal_plist(env, event_plist)
     }
 }
 
@@ -395,7 +395,8 @@ private func maccalfw_update_event(
         do {
             if let args, let arg0 = args[0] {
                 try AuthorizeCalendar(env)
-                let future = nargs > 1 ? try Bool.fromEmacsVal(env, args[1]) : false
+                let start = nargs > 1 ? try Date.fromEmacsVal(env, args[1]) : nil
+                let future = nargs > 2 ? try Bool.fromEmacsVal(env, args[2]) : false
 
                 let eventData = try fromEmacsVal_plist(env, arg0)
                 let eventId =
@@ -403,7 +404,7 @@ private func maccalfw_update_event(
                 var event : EKEvent
 
                 if let eventId, let eventId {
-                    let old_event = eventStore.event(withIdentifier: eventId)
+                    let old_event = getEKEvent(eventId, start)
                     if let old_event {
                         event = old_event
                     }
@@ -610,40 +611,49 @@ calendar IDs.
 (fn CALENDAR-ID START-TIME END-TIME)
 """)
 
-        emacs_defun(env, "maccalfw-update-event", 1, 2, maccalfw_update_event,
+        emacs_defun(env, "maccalfw-update-event", 1, 3, maccalfw_update_event,
 """
 Update or create an EVENT.
-EVENT is a plist specifying event data. Only the key-value pairs in the plist
-are updated. If the plist contains a non-nil `:id` then the corresponding
-event is updated. Otherwise, the plist must contain `:calendar-id` entry and
-an event is created.
 
-If FUTURE is non-nil, all future events in a recurrent series are updated,
-otherwise only the given event is updated.
+EVENT is a plist specifying the event data. Only the key-value pairs in the plist
+are updated. If the plist contains a non-nil `:id`, the corresponding event is
+updated. Otherwise, the plist must contain a `:calendar-id` entry, and a new event
+is created in that calendar.
 
-Note that if the event has a different `:calendar-id`, the event moved to
-the new calendar.
+START specifies the event's original start date, which is used to distinguish
+events with the same `:id` (typically recurring events). Note that this should
+be the old start date of the event if you are updating it. The EVENT plist may
+contain a new start date for the update.
 
-Returns the data of the newly event.
+If FUTURE is non-nil, all future occurrences in a recurring series are updated;
+otherwise, only the specific event matching the `START` date is updated.
 
-(fn ID &optional FUTURE)
+If the event includes a different `:calendar-id`, it is moved to the new calendar.
+
+Returns the data of the newly created or updated event.
+
+(fn EVENT &optional START FUTURE)
 """)
 
         emacs_defun(env, "maccalfw-get-event", 1, 2, maccalfw_get_event,
 """
 Return event details given its ID.
-START is the expected start date which is used to distinguish events with same
-ID.
+
+START specifies the start date of the event, which is used to
+distinguish between events with the same ID (typically recurring events).
 
 (fn ID &optional START)
 """)
         emacs_defun(env, "maccalfw-remove-event", 1, 3, maccalfw_remove_event,
 """
 Remove an event given its ID.
-START is the expected start date which is used to distinguish events with same
-ID.
-If FUTURE is non-nil, all future events in a recurrent series are removed,
-otherwise only the given event is removed.
+
+START specifies the start date of the event, which is used to
+distinguish between events with the same ID (typically recurring events).
+
+If FUTURE is non-nil, all future occurrences in a recurring series are
+removed; otherwise, only the specific event matching the START date is
+removed.
 
 (fn ID &optional START FUTURE)
 """)
