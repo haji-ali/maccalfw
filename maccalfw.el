@@ -36,9 +36,6 @@
 
 ;;; Code:
 
-;; TODO: Tabbing goes through some hidden fields on initial view before
-;; "Until" and after some hide/showing after "After".
-
 (require 'calfw)
 (require 'wid-edit)
 (require 'org)
@@ -371,7 +368,6 @@ If DUPLICATE is non-nil, save the event as a new one."
            :location (maccalfw-event--value 'location widgets)
            :availability (maccalfw-event--value 'availability widgets)
            :notes (maccalfw-event--value 'notes widgets)))
-         (new-all-data new-data)
          (new-event (null old-id)))
     (when (plist-get old-data :read-only)
       (user-error "Event is not editable.?"))
@@ -692,8 +688,38 @@ If DELETE is non-nil, delete the widget instead."
                  do (overlay-put overlay key val))
         (widget-put widget key overlay)))))
 
+(defun maccalfw-event--make-widget-untabbale (widget untabbable)
+  "Make a WIDGET tabbable or not based on UNTABBABLE.
+
+Recursively go childeren and buttons inside WIDGET. Hidden
+children and children of `radio-button-choice' widgets
+\(typically labels) are always made untabbable regardless of the
+value of UNTABBABLE."
+  ;; Need to check if any of the parents are hidden
+  (widget-put widget :tab-order (when untabbable -1))
+  ;; Do the same to child widgets
+  (cl-loop for
+           (lst untabbable) in
+           (list (list (widget-get widget :children)
+                       (or
+                        (eq (widget-type widget) 'radio-button-choice)
+                        untabbable))
+                 ;; Some widgets have buttons, which are not
+                 ;; children. Make these untabbable as well
+                 (list (widget-get widget :buttons)
+                       untabbable))
+           do
+           (cl-loop for child in lst
+                    do
+                    (maccalfw-event--make-widget-untabbale
+                     child
+                     (or
+                      (widget-get child :hidden)
+                      untabbable)))))
+
 (defun maccalfw-event--show-hide-widget (widget visible)
-  "Show/hide WIDGET based on value of VISIBLE."
+  "Show/hide WIDGET based on value of VISIBLE.
+Also make it untabbable if hidden."
   (maccalfw-event--widget-overlay
    widget
    :hidden visible
@@ -701,19 +727,16 @@ If DELETE is non-nil, delete the widget instead."
    'priority 101
    'invisible (not visible))
 
-  ;; Make widget untabbable if hidden
-  (widget-put widget :tab-order (unless visible -1))
-  ;; Do the same to child widgets
-  (cl-loop for child in (widget-get widget :children)
-           do
-           (widget-put child :tab-order
-                       (unless visible -1)))
-  ;; Some widgets have buttons, which are not children. Make these untabbable
-  ;; as well
-  (cl-loop for child in (widget-get widget :buttons)
-           do
-           (widget-put child :tab-order
-                       (unless visible -1))))
+  ;; Make widget untabbable if hidden, or any of its parents are hidden
+  (maccalfw-event--make-widget-untabbale
+   widget
+   (or (not visible)
+       (cl-some
+        'identity
+        (cl-loop
+         with parent = widget
+         while (setq parent (widget-get parent :parent))
+         collect (widget-get parent :hidden))))))
 
 (defun maccalfw-event--make-inactive (&optional active)
   "Make all widgets in the current buffer inactive.
@@ -1284,7 +1307,6 @@ abort `\\[maccalfw-event-kill]'."))
                do
                (cl-loop for child in (widget-get wid :children)
                         do (widget-put child :tab-order -1))))
-
     (goto-char (point-min))
     (widget-move 1) ;; Go to next widget (should be title)
     (widget-end-of-line) ;; Go to end of line
