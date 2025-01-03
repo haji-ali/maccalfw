@@ -120,7 +120,7 @@ extension EKRecurrenceDayOfWeek : EmacsCastable {
 
     static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
                              _ val: emacs_value?) throws -> Self {
-      let data = try fromEmacsVal_plist(env, val);
+      let data = try fromEmacsVal_plist(env, val)
       let dayOfTheWeek : EKWeekday  = try EKWeekday.fromEmacsVal(env, data["week-day"])
       // if let tmp = data["week-day"] {
       //     dayOfTheWeek = EKWeekday.fromEmacsVal(env, tmp)
@@ -155,7 +155,7 @@ extension EKRecurrenceRule : EmacsCastable {
 
     static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
                              _ val: emacs_value?) throws -> Self {
-        let data = try fromEmacsVal_plist(env, val);
+        let data = try fromEmacsVal_plist(env, val)
         let freq = try EKRecurrenceFrequency.fromEmacsVal(env, data["frequency"])
         // Default to an interval of 1
         let interval = Int.fromEmacsVal(env, data["interval"]) ?? 1
@@ -174,27 +174,27 @@ extension EKRecurrenceRule : EmacsCastable {
             end = EKRecurrenceEnd(occurrenceCount: val)
         }
         // Complex rule
-        if let tmp = data["daysOfTheWeek"] {
+        if let tmp = data["week-days"] {
             daysOfTheWeek = try fromEmacsVal_list(env, tmp).map{
-              try EKRecurrenceDayOfWeek.fromEmacsVal(env, $0)}
+                try EKRecurrenceDayOfWeek.fromEmacsVal(env, $0)}
         }
-        if let tmp = data["daysOfTheMonth"] {
+        if let tmp = data["month-days"] {
             daysOfTheMonth = fromEmacsVal_list(env, tmp).compactMap{
                 Int.fromEmacsVal(env, $0).map(NSNumber.init)}
         }
-        if let tmp = data["daysOfTheYear"] {
+        if let tmp = data["year-days"] {
             daysOfTheYear = fromEmacsVal_list(env, tmp).compactMap{
                 Int.fromEmacsVal(env, $0).map(NSNumber.init)}
         }
-        if let tmp = data["weeksOfTheYear"] {
+        if let tmp = data["year-weeks"] {
             weeksOfTheYear = fromEmacsVal_list(env, tmp).compactMap{
                 Int.fromEmacsVal(env, $0).map(NSNumber.init)}
         }
-        if let tmp = data["monthsOfTheYear"] {
+        if let tmp = data["year-months"] {
             monthsOfTheYear = fromEmacsVal_list(env, tmp).compactMap{
                 Int.fromEmacsVal(env, $0).map(NSNumber.init)}
         }
-        if let tmp = data["setPositions"] {
+        if let tmp = data["set-positions"] {
             setPositions =  fromEmacsVal_list(env, tmp).compactMap{
                 Int.fromEmacsVal(env, $0).map(NSNumber.init)}
         }

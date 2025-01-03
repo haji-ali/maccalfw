@@ -36,7 +36,8 @@
 
 ;;; Code:
 
-;; TODO Weekly events with days don't work!
+;; TODO: Tabbing goes through some hidden fields on initial view before
+;; "Until" and after some hide/showing after "After".
 
 (require 'calfw)
 (require 'wid-edit)
@@ -1068,10 +1069,10 @@ abort `\\[maccalfw-event-kill]'."))
                :field-key recurrence-frequency
                :entry-format "%b %v"
                :format "%v\n"
-               :hs ((weekly . recurrence-weekdays)
-                    (monthly recurrence-weekdays
+               :hs ((weekly . recurrence-week-days)
+                    (monthly recurrence-week-days
                              recurrence-month-days)
-                    (yearly recurrence-weekdays
+                    (yearly recurrence-week-days
                             recurrence-year-months
                             recurrence-year-weeks
                             recurrence-year-days))
@@ -1085,9 +1086,13 @@ abort `\\[maccalfw-event-kill]'."))
 
              (append
               `(checklist
-                :field-key recurrence-weekdays
+                :field-key recurrence-week-days
                 :indent 3
                 :format "on %v\n"
+                :value-to-external
+                (lambda (widget value)
+                  (cl-loop for v in value
+                           collect (list :week-day v)))
                 :value ,(cl-loop for day in (plist-get recur :week-days)
                                  collect (plist-get day :week-day)))
               (cl-loop
@@ -1225,8 +1230,6 @@ abort `\\[maccalfw-event-kill]'."))
                                         "recurrence-")))
                    value))))
              :indent 3
-             ;; TODO: this doesn't work for some reason
-             ;;
              ;; We have to set the group value here because otherwise the
              ;; checklists are not set correctly. This is because the group
              ;; value is nil by default which leads to resetting of all
