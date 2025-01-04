@@ -15,11 +15,11 @@ extension EKEventAvailability : EmacsCastable  {
       .unavailable: "unavailable"]
 
     // TODO: I don't know if I can get away without repeating these definitions
-    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
         return toEmacsVal_Enum(env, Self.enumMap, self)
         }
 
-    static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
+    static func fromEmacsVal(_ env: PEmacsEnv,
                       _ val: emacs_value?) throws -> Self {
         return try fromEmacsVal_Enum(env, Self.enumMap, val)
     }
@@ -33,11 +33,11 @@ extension EKRecurrenceFrequency : EmacsCastable  {
       .yearly: "yearly"]
 
 
-    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
         return toEmacsVal_Enum(env, Self.enumMap, self)
         }
 
-    static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
+    static func fromEmacsVal(_ env: PEmacsEnv,
                              _ val: emacs_value?) throws -> Self {
         return try fromEmacsVal_Enum(env, Self.enumMap, val)
     }
@@ -54,11 +54,11 @@ extension EKWeekday: EmacsCastable {
         .saturday: "saturday"
     ]
 
-    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
         return toEmacsVal_Enum(env, Self.enumMap, self)
     }
 
-    static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
+    static func fromEmacsVal(_ env: PEmacsEnv,
                              _ val: emacs_value?) throws -> Self {
         return try fromEmacsVal_Enum(env, Self.enumMap, val)
     }
@@ -70,18 +70,18 @@ extension EKEventStatus : EmacsCastable  {
       .tentative: "tentative",
       .canceled: "cancelled"]
 
-    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
         return toEmacsVal_Enum(env, Self.enumMap, self)
     }
 
-    static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
+    static func fromEmacsVal(_ env: PEmacsEnv,
                       _ val: emacs_value?) throws -> Self {
         return try fromEmacsVal_Enum(env, Self.enumMap, val)
     }
 }
 
 extension EKEvent : EmacsCastable {
-    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
         let event_plist : [String : EmacsCastable?] =
           [":id" : self.eventIdentifier,
            ":calendar-id" : self.calendar.calendarIdentifier,
@@ -110,7 +110,7 @@ extension EKEvent : EmacsCastable {
 }
 
 extension EKRecurrenceDayOfWeek : EmacsCastable {
-    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
         let plist : [String : EmacsCastable?] =
           [":week-day" : self.dayOfTheWeek,
            ":week-number" : self.weekNumber]
@@ -118,7 +118,7 @@ extension EKRecurrenceDayOfWeek : EmacsCastable {
         return toEmacsVal_plist(env, plist)
     }
 
-    static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
+    static func fromEmacsVal(_ env: PEmacsEnv,
                              _ val: emacs_value?) throws -> Self {
       let data = try fromEmacsVal_plist(env, val)
       let dayOfTheWeek : EKWeekday  = try EKWeekday.fromEmacsVal(env, data["week-day"])
@@ -134,7 +134,7 @@ extension EKRecurrenceDayOfWeek : EmacsCastable {
 }
 
 extension EKRecurrenceRule : EmacsCastable {
-    func toEmacsVal(_ env: UnsafeMutablePointer<emacs_env>) -> emacs_value? {
+    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
         let plist : [String : EmacsCastable?] =
           [":end-date" : self.recurrenceEnd?.endDate as EmacsCastable?,
            ":occurrence-count" : self.recurrenceEnd?.occurrenceCount,
@@ -153,7 +153,7 @@ extension EKRecurrenceRule : EmacsCastable {
         return toEmacsVal_plist(env, plist)
     }
 
-    static func fromEmacsVal(_ env: UnsafeMutablePointer<emacs_env>,
+    static func fromEmacsVal(_ env: PEmacsEnv,
                              _ val: emacs_value?) throws -> Self {
         let data = try fromEmacsVal_plist(env, val)
         let freq = try EKRecurrenceFrequency.fromEmacsVal(env, data["frequency"])
@@ -211,7 +211,7 @@ extension EKRecurrenceRule : EmacsCastable {
 }
 
 
-private func AuthorizeCalendar(_ env: UnsafeMutablePointer<emacs_env>) throws {
+private func AuthorizeCalendar(_ env: PEmacsEnv) throws {
     switch EKEventStore.authorizationStatus(for: .event) {
     case .authorized: fallthrough
     case .fullAccess:
@@ -253,10 +253,10 @@ private func getEKEvent(_ event_id : String,
     return event_data
 }
 
-private func maccalfw_get_calendars(_ env: UnsafeMutablePointer<emacs_env>?,
+private func maccalfw_get_calendars(_ env: PEmacsEnv?,
                           _ nargs: Int,
-                          _ args: UnsafeMutablePointer<emacs_value?>?,
-                          _ data: UnsafeMutableRawPointer?) -> emacs_value? {
+                          _ args: POptEmacsValue?,
+                          _ : UnsafeMutableRawPointer?) -> emacs_value? {
     if let env {
         do {
             try AuthorizeCalendar(env)
@@ -291,10 +291,10 @@ private func maccalfw_get_calendars(_ env: UnsafeMutablePointer<emacs_env>?,
 }
 
 private func maccalfw_fetch_events(
-  _ env: UnsafeMutablePointer<emacs_env>?,
+  _ env: PEmacsEnv?,
   _ nargs: Int,
-  _ args: UnsafeMutablePointer<emacs_value?>?,
-  _ data: UnsafeMutableRawPointer?) -> emacs_value?
+  _ args: POptEmacsValue?,
+  _ : UnsafeMutableRawPointer?) -> emacs_value?
 {
     if let env {
         do {
@@ -360,10 +360,10 @@ private func maccalfw_fetch_events(
 }
 
 private func maccalfw_get_event(
-  _ env: UnsafeMutablePointer<emacs_env>?,
+  _ env: PEmacsEnv?,
   _ nargs: Int,
-  _ args: UnsafeMutablePointer<emacs_value?>?,
-  _ data: UnsafeMutableRawPointer?) -> emacs_value?
+  _ args: POptEmacsValue?,
+  _ : UnsafeMutableRawPointer?) -> emacs_value?
 {
     if let env {
         do {
@@ -386,10 +386,10 @@ private func maccalfw_get_event(
 }
 
 private func maccalfw_update_event(
-  _ env: UnsafeMutablePointer<emacs_env>?,
+  _ env: PEmacsEnv?,
   _ nargs: Int,
-  _ args: UnsafeMutablePointer<emacs_value?>?,
-  _ data: UnsafeMutableRawPointer?) -> emacs_value?
+  _ args: POptEmacsValue?,
+  _ : UnsafeMutableRawPointer?) -> emacs_value?
 {
     if let env {
         do {
@@ -487,10 +487,10 @@ private func maccalfw_update_event(
 }
 
 private func maccalfw_remove_event(
-  _ env: UnsafeMutablePointer<emacs_env>?,
+  _ env: PEmacsEnv?,
   _ nargs: Int,
-  _ args: UnsafeMutablePointer<emacs_value?>?,
-  _ data: UnsafeMutableRawPointer?) -> emacs_value?
+  _ args: POptEmacsValue?,
+  _ : UnsafeMutableRawPointer?) -> emacs_value?
 {
     if let env, let args {
         do {
@@ -523,10 +523,10 @@ private func maccalfw_remove_event(
 
 
 private func maccalfw_timezones(
-  _ env: UnsafeMutablePointer<emacs_env>?,
+  _ env: PEmacsEnv?,
   _ nargs: Int,
-  _ args: UnsafeMutablePointer<emacs_value?>?,
-  _ data: UnsafeMutableRawPointer?) -> emacs_value?
+  _ args: POptEmacsValue?,
+  _ : UnsafeMutableRawPointer?) -> emacs_value?
 {
     if let env {
         do {
@@ -564,10 +564,10 @@ private func maccalfw_timezones(
 
 
 private func maccalfw_refresh(
-  _ env: UnsafeMutablePointer<emacs_env>?,
+  _ env: PEmacsEnv?,
   _ nargs: Int,
-  _ args: UnsafeMutablePointer<emacs_value?>?,
-  _ data: UnsafeMutableRawPointer?) -> emacs_value?
+  _ args: POptEmacsValue?,
+  _ : UnsafeMutableRawPointer?) -> emacs_value?
 {
     if let env {
         do {
@@ -588,7 +588,7 @@ public func emacs_module_init(_ runtime: UnsafeMutablePointer<emacs_runtime>) ->
         return 1
     }
 
-    let env = runtime.pointee.get_environment(runtime) as UnsafeMutablePointer<emacs_env>?
+    let env = runtime.pointee.get_environment(runtime) as PEmacsEnv?
     if let env {
         if MemoryLayout<emacs_env>.size > Int(env.pointee.size) {
             return 2
