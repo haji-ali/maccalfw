@@ -179,13 +179,13 @@ extension Dictionary : EmacsCastable where Key == emacs_value?, Value == EmacsCa
 }
 
 func emacs_funcall(_ env: PEmacsEnv,
-                   _ func_name : emacs_value?,
+                   _ func_intern : emacs_value?,
                    _ args : [emacs_value?]) -> emacs_value? {
     var arguments = args.map{$0 ?? Qnil} // Change nil to Qnil
     let count = arguments.count
     return arguments.withUnsafeMutableBufferPointer{
         bufferPointer in
-        env.pointee.funcall(env, func_name,
+        env.pointee.funcall(env, func_intern,
                             count,
                             bufferPointer.baseAddress!)
     }
@@ -204,18 +204,11 @@ func emacs_defun(_ env: PEmacsEnv,
                          _ max: Int,
                  _ fun: EmacsDefunCallback?,
                  _ doc : String?) {
-    let internSymbol = emacs_intern(env, "defalias")
-    let functionName = emacs_intern(env, name)
     let function = env.pointee.make_function(env, min, max, fun,
                                              doc, nil)
-
-    withExtendedLifetime(internSymbol) {
-        withExtendedLifetime(functionName) {
-            withExtendedLifetime(function) {
-                _ = emacs_funcall(env, internSymbol, [functionName, function])
-            }
-        }
-    }
+    _ = emacs_funcall(env,
+                      emacs_intern(env, "defalias"),
+                      [emacs_intern(env, name), function])
 }
 
 func emacs_cons(_ env: PEmacsEnv,
