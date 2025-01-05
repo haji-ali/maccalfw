@@ -651,10 +651,14 @@ the user, displaying the message PROMPT."
   (interactive
    (list (or (get-text-property (point) 'cfw:event)
              (error "No event at location"))))
-  (or (prog1 (maccalfw-remove-event
-              (plist-get (cfw:event-data event) :id)
-              (plist-get (cfw:event-data event) :start)
-              (maccalfw-event-modify-future-events-p))
+  (or (prog1
+          (let ((ev (cfw:event-data event)))
+            (maccalfw-remove-event
+             (plist-get ev :id)
+             (plist-get ev :start)
+             (if (plist-get ev :recurrence)
+                 (maccalfw-event-modify-future-events-p)
+               nil)))
         (message "Event deleted")
         (cfw:refresh-calendar-buffer nil))
       (error "Deleting event failed")))
