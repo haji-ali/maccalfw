@@ -6,6 +6,23 @@ let eventStore = EKEventStore()
 var Qt : emacs_value?
 var Qnil : emacs_value?
 
+extension EmacsEnumCastable {
+    func toiCal() throws -> String {
+        if let tmp = Self.enumMap[self] {
+            return tmp.uppercased()
+        }
+        throw EmacsError.error("Unexpected error when interpolating \(String(describing: Self.self))")
+    }
+
+    static func fromiCal(_ v: String) throws -> Self {
+        let lv = v.lowercased()
+        if let tmp = Self.enumMap.first(where: { $0.value == lv }) {
+            return tmp.key
+        }
+        throw EmacsError.error("Invalid value when parsing \(String(describing: Self.self))")
+    }
+}
+
 extension EKEventAvailability : EmacsEnumCastable  {
     static let enumMap: [Self : String] = [
       .tentative: "tentative",
@@ -42,6 +59,80 @@ extension EKEventStatus : EmacsEnumCastable  {
       .confirmed: "confirmed",
       .tentative: "tentative",
       .canceled: "cancelled"]
+}
+
+extension Date {
+    func toiCal(_ all_day : Bool = false,
+                _ timeZoneId : String? = nil) -> [EmacsCastable?] {
+        var params : [EmacsCastable?]? = nil
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        if all_day {
+            params = [EmacsQuote("VALUE"), "DATE"]
+            dateFormatter.dateFormat = "yyyyMMdd"
+        }
+        else {
+            if let timeZoneId {
+                params = [EmacsQuote("TZID"), timeZoneId]
+            }
+            dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
+            if timeZoneId == nil{
+                dateFormatter.dateFormat += "'Z'"
+            }
+        }
+        return [params, dateFormatter.string(from: self)]
+    }
+
+    static func fromiCal(_ dateString: String) throws -> Self {
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        if let date = dateFormatter.date(from: dateString) {
+            return date
+        }
+        throw EmacsError.error("Failed to parse iCal date: \(dateString)")
+    }
+    static func fromiCal(_ env: PEmacsEnv,
+                         _ v: [emacs_value?]) throws ->
+      (date: Self, isAllDay: Bool, timeZone: String?) {
+        guard v.count == 2, let dateString = String.fromEmacsVal(env, v[1]) else {
+            throw EmacsError.error("Invalid iCal input format: \(v)")
+        }
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        let params = fromEmacsVal_list(env, v[0])
+        if params.count >= 2 {
+            // Check for "VALUE=DATE" (all-day event)
+            if let key = String.fromEmacsVal(env, params[0]),
+               let value = String.fromEmacsVal(env, params[1]) {
+                if key == "VALUE", value == "DATE" {
+                    dateFormatter.dateFormat = "yyyyMMdd"
+                    if let date = dateFormatter.date(from: dateString) {
+                        return (date, true, nil)
+                    }
+                }
+                // Check for "TZID=<timeZoneId>" (specific time zone)
+                if key == "TZID" {
+                    let timeZoneId = value
+                    dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
+                    dateFormatter.timeZone = TimeZone(identifier: timeZoneId)
+                    if let date = dateFormatter.date(from: dateString) {
+                        return (date, false, timeZoneId)
+                    }
+                }
+            }
+        } else {
+            // Default case: assume UTC, not all day event
+            dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+            dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+            if let date = dateFormatter.date(from: dateString) {
+                return (date, false, nil)
+            }
+        }
+        throw EmacsError.error("Failed to parse iCal date")
+    }
 }
 
 extension EKEvent : EmacsCastable {
@@ -125,6 +216,113 @@ extension EKEvent : EmacsCastable {
         // Read-only: occurrenceDate, organizer, last_modified, created_date
         // detached-p, status
     }
+
+    func toiCal() throws -> EmacsCastable {
+        let event_plist : [String : EmacsCastable?] =
+          ["UID" : self.eventIdentifier,
+           "SUMMARY" : self.title,
+           "LOCATION" : self.location,
+           "DESCRIPTION" : self.hasNotes ? self.notes : nil,
+           "DTSTART" : self.startDate?.toiCal(self.isAllDay,
+                                              self.timeZone?.identifier),
+           // NOTE: iCal and apple calendar support different timezones, but
+           // not EKEvent, it seems
+           "DTEND" : self.endDate?.toiCal(self.isAllDay,
+                                          self.timeZone?.identifier),
+           "DTSTAMP" : self.creationDate?.toiCal(),
+           "LAST-MODIFIED" : self.lastModifiedDate?.toiCal(),
+           "STATUS" : try self.status.toiCal(),
+           "ORGANIZER" : self.organizer?.name,
+           "URL" : self.url?.absoluteString,
+           // TRANSP Doesn't support tentative nor notsupported.
+           "TRANSP" : try self.availability.toiCal(),
+
+           // TODO: Save in one read-only?
+           "X-MACCALFW-CALID" : self.calendar.calendarIdentifier,
+           "X-MACCALFW-OCCURENCE-DATE" : self.occurrenceDate.toiCal(),
+           // These will not be included at all if they are nil.
+           "X-MACCALFW-DETACHED-P" : self.isDetached ? "yes" : nil,
+           "X-MACCALFW-ORGANIZER-CURRENT-USER" : (self.organizer?.isCurrentUser ?? true) ? nil : "yes",
+           "X-MACCALFW-READ-ONLY" : self.calendar.allowsContentModifications ? nil : "yes"]
+
+        var flatArgs : [EmacsCastable?] =
+          event_plist.compactMap { (key, value) in
+              guard let unwrappedValue = value else { return nil }
+              return [EmacsQuote(key)] +
+                ((unwrappedValue as? [EmacsCastable?]) ?? [nil, value])
+          }
+
+
+        if self.hasRecurrenceRules, let rules = self.recurrenceRules {
+            for rule in rules {
+                flatArgs.append([EmacsQuote("RRULE"), nil, try rule.toiCal()])
+            }
+        }
+        return flatArgs
+    }
+
+    func updateFromiCalAList(_ env: PEmacsEnv,
+                             _ eventData: [(key: String,
+                                            value: [emacs_value?])]) throws {
+        for item in eventData {
+            let element_raw = item.value.count > 1 ? item.value[1] : nil
+            switch item.key {
+            case "SUMMARY":
+                self.title = String.fromEmacsVal(env, element_raw)
+
+            case "LOCATION":
+                let str = String.fromEmacsVal(env, element_raw)
+                self.location = (str?.isEmpty ?? true) ? nil : str
+
+            case "DESCRIPTION":
+                self.notes = String.fromEmacsVal(env, element_raw)
+
+            case "DTSTART":
+                let date = try Date.fromiCal(env, Array(item.value.dropFirst()))
+                self.startDate = date.date
+                self.isAllDay = date.isAllDay
+                self.timeZone = ((date.timeZone?.isEmpty ?? true) ? nil
+                                   : TimeZone(identifier: date.timeZone!))
+
+            case "DTEND":
+                let date = try Date.fromiCal(env, Array(item.value.dropFirst()))
+                self.endDate = date.date
+                // NOTE: We'll ignore timeZone from endDate for now
+                // while we figure out a solution for EKEvent
+                // self.isAllDay = date.isAllDay
+                // self.timeZone = ((date.timeZone?.isEmpty ?? true) ? nil
+                //                    : TimeZone(identifier: date.timeZone!))
+
+            case "X-AVAILABILITY":
+                self.availability = try EKEventAvailability.fromEmacsVal(env, element_raw)
+
+            case "URL":
+                let str = String.fromEmacsVal(env, element_raw)
+                self.url = ((str?.isEmpty ?? true) ? nil : URL(string: str!))
+
+            case "X-CALID":
+                let calendarId = String.fromEmacsVal(env, element_raw)
+                if let calendarId,
+                   let calendar = eventStore.calendar(withIdentifier: calendarId) {
+                    self.calendar = calendar
+                } else {
+                    throw EmacsError.error("Cannot retrieve calendar")
+                }
+
+            case "RRULE":
+                guard let ruleString = String.fromEmacsVal(env, element_raw)
+                else {
+                    throw EmacsError.error("RRULE should have a string element.")
+                }
+                self.recurrenceRules = nil
+                self.addRecurrenceRule(try EKRecurrenceRule.fromiCal(ruleString))
+
+            default:
+                // Ignore unhandled keys
+                break
+            }
+        }
+    }
 }
 
 extension EKRecurrenceDayOfWeek : EmacsCastable {
@@ -146,6 +344,31 @@ extension EKRecurrenceDayOfWeek : EmacsCastable {
       }
       return Self.init(dayOfTheWeek)
     }
+
+
+    func toiCal() throws -> String {
+         var str = try self.dayOfTheWeek.toiCal()
+         if self.weekNumber > 0 {
+            str += "(\(String(format: "%+d", self.weekNumber)))"
+         }
+         return str
+    }
+
+    static func fromiCal(_ val : String) throws -> Self {
+        // Define the Swift Regex pattern with groups
+        let regex = #/^([A-Z]+)(?:\(([-+]?\d+)\))?$/#
+
+        // Match the input string
+        guard let match = try? regex.wholeMatch(in: val) else {
+            throw EmacsError.error("Invalid iCal string format: \(val)")
+        }
+        // // Extract dayOfWeek and optional weekNumber
+        let dayOfWeek = try EKWeekday.fromiCal(String(match.output.1))
+        let weekNumber = match.output.2.flatMap { Int($0) } ?? 0
+
+        // Return the constructed EKRecurrenceDayOfWeek
+        return Self(dayOfWeek, weekNumber: weekNumber)
+    }
 }
 
 extension EKRecurrenceRule : EmacsCastable {
@@ -166,6 +389,113 @@ extension EKRecurrenceRule : EmacsCastable {
            ":set-positions": self.setPositions as [EmacsCastable?]?]
 
         return toEmacsVal_plist(env, plist)
+    }
+
+    func toiCal() throws -> String {
+        var rrule = "FREQ=\(try self.frequency.toiCal());"
+        rrule += "WKST=\(self.firstDayOfTheWeek);"
+        if self.interval > 1 {
+            rrule += "INTERVAL=\(self.interval);"
+        }
+        if let daysOfTheWeek = self.daysOfTheWeek {
+            let days = try daysOfTheWeek.map { try $0.toiCal() }.joined(separator: ",")
+            rrule += "BYDAY=\(days);"
+        }
+        if let daysOfTheMonth = self.daysOfTheMonth {
+            let days = daysOfTheMonth.map { "\($0)" }.joined(separator: ",")
+            rrule += "BYMONTHDAY=\(days);"
+        }
+        if let monthsOfTheYear = self.monthsOfTheYear {
+            let months = monthsOfTheYear.map { "\($0)" }.joined(separator: ",")
+            rrule += "BYMONTH=\(months);"
+        }
+        if let weeksOfTheYear = self.weeksOfTheYear {
+            let weeks = weeksOfTheYear.map { "\($0)" }.joined(separator: ",")
+            rrule += "BYWEEKNO=\(weeks);"
+        }
+        if let daysOfTheYear = self.daysOfTheYear {
+            let days = daysOfTheYear.map { "\($0)" }.joined(separator: ",")
+            rrule += "BYYEARDAY=\(days);"
+        }
+        if let endDate = self.recurrenceEnd?.endDate {
+            rrule += "UNTIL=\(endDate.toiCal());"
+        }
+        else if let occurrenceCount = self.recurrenceEnd?.occurrenceCount {
+            rrule += "COUNT=\(occurrenceCount);"
+        }
+        if let setPositions = self.setPositions {
+            let setpos = setPositions.map { "\($0)" }.joined(separator: ",")
+            rrule += "BYSETPOS=\(setpos);"
+        }
+        return rrule
+    }
+
+    static func fromiCal(_ val: String) throws -> Self {
+        let components = val.components(separatedBy: ";")
+        let result = components.map { component in
+            let keyValue = component.split(separator: "=",
+                                           maxSplits: 1).map(String.init)
+            if keyValue.count == 2 {
+                // Split the value by "," for multi-value keys
+                return [keyValue[0]] + keyValue[1].split(
+                  separator: ",").map(String.init)
+            }
+            return [keyValue[0]]
+        }
+
+        var freq = EKRecurrenceFrequency.daily
+        // Default to an interval of 1
+        var interval : Int = 1
+        var daysOfTheWeek: [EKRecurrenceDayOfWeek]? = nil
+        var end: EKRecurrenceEnd? = nil
+        var daysOfTheMonth, daysOfTheYear,
+            weeksOfTheYear, monthsOfTheYear, setPositions : [NSNumber]?
+
+        for field in result {
+            switch field[0] {
+            case "FREQ":
+                freq = try EKRecurrenceFrequency.fromiCal(field[1])
+            case "UNTIL":
+                end = EKRecurrenceEnd(end: try Date.fromiCal(field[1]))
+            case "BYDAY":
+                daysOfTheWeek = try field.dropFirst().compactMap {
+                    try EKRecurrenceDayOfWeek.fromiCal($0) }
+            default:
+                let parsed = field.dropFirst().compactMap{
+                    Int($0).map(NSNumber.init)}
+                switch field[0] {
+                case "WKST":
+                    if parsed[0] != 2 {
+                        throw EmacsError.error("Cannot handle non-standard week start.")
+                    }
+                case "COUNT":
+                    end = EKRecurrenceEnd(occurrenceCount: parsed[0].intValue)
+                case "INTERVAL":
+                    interval = parsed[0].intValue
+                case "BYMONTHDAY":
+                    daysOfTheMonth = parsed
+                case "BYMONTH":
+                    monthsOfTheYear = parsed
+                case "BYWEEKNO":
+                    weeksOfTheYear = parsed
+                case "BYYEARDAY":
+                    daysOfTheYear = parsed
+                case "BYSETPOS":
+                    setPositions = parsed
+                default:
+                    throw EmacsError.error("Invalid format for recurrence rule")
+                }
+            }
+        }
+        return Self(recurrenceWith: freq,
+                    interval: interval,
+                    daysOfTheWeek: daysOfTheWeek,
+                    daysOfTheMonth: daysOfTheMonth,
+                    monthsOfTheYear: monthsOfTheYear,
+                    weeksOfTheYear: weeksOfTheYear,
+                    daysOfTheYear: daysOfTheYear,
+                    setPositions: setPositions,
+                    end: end)
     }
 
     static func fromEmacsVal(_ env: PEmacsEnv,
@@ -389,8 +719,14 @@ private func maccalfw_get_event(
             try AuthorizeCalendar(env)
             if let args, let eventId = String.fromEmacsVal(env, args[0]) {
                 let start = nargs > 1 ? Date.fromEmacsVal(env, args[1]) : nil
+                let ical = nargs > 2 ? Bool.fromEmacsVal(env, args[2]) : false
                 let event_data = try getEKEvent(eventId, start)
-                return event_data.toEmacsVal(env)
+                if ical {
+                    return try event_data.toiCal().toEmacsVal(env)
+                }
+                else {
+                    return event_data.toEmacsVal(env)
+                }
             }
         }
         catch {
@@ -412,18 +748,48 @@ private func maccalfw_update_event(
                 try AuthorizeCalendar(env)
                 let start = nargs > 1 ? Date.fromEmacsVal(env, args[1]) : nil
                 let future = nargs > 2 ? Bool.fromEmacsVal(env, args[2]) : false
+                let ical = nargs > 3 ? Bool.fromEmacsVal(env, args[3]) : false
                 let event : EKEvent
-                let eventData = try fromEmacsVal_plist(env, arg0)
 
-                if let eventId = String.fromEmacsVal(env, eventData["id"]) {
-                    event = try getEKEvent(eventId, start)
+                if ical {
+                    let eventData = fromEmacsVal_list(env, arg0).map {
+                        let lst = fromEmacsVal_list(env, $0);
+                        guard let first = lst.first,
+                              let sfirst = String.fromEmacsVal(env, first)
+                        else {return (key: "", value: lst) }
+                        return (key : sfirst,
+                                value: Array(lst.dropFirst()))}
+
+                    var eventId : String? = nil
+                    for item in eventData {
+                        if item.key == "UID" && item.value.count > 2
+                        {
+                            eventId = String.fromEmacsVal(env, item.value[1])
+                            break
+                        }
+                    }
+
+                    if let eventId  {
+                        event = try getEKEvent(eventId, start)
+                    }
+                    else {
+                        event = EKEvent(eventStore: eventStore)
+                    }
+
+                    try event.updateFromiCalAList(env, eventData)
                 }
                 else {
-                    event = EKEvent(eventStore: eventStore)
+                    let eventData = try fromEmacsVal_plist(env, arg0)
+
+                    if let eventId = String.fromEmacsVal(env, eventData["id"]) {
+                        event = try getEKEvent(eventId, start)
+                    }
+                    else {
+                        event = EKEvent(eventStore: eventStore)
+                    }
+
+                    try event.updateFromPList(env, eventData)
                 }
-
-                try event.updateFromPList(env, eventData)
-
 
                 do {
                     try eventStore.save(event,
@@ -588,14 +954,14 @@ Returns the data of the newly created or updated event.
 (fn EVENT &optional START FUTURE)
 """)
 
-        emacs_defun(env, "maccalfw-get-event", 1, 2, maccalfw_get_event,
+        emacs_defun(env, "maccalfw-get-event", 1, 3, maccalfw_get_event,
 """
 Return event details given its ID.
 
 START specifies the start date of the event, which is used to
 distinguish between events with the same ID (typically recurring events).
 
-(fn ID &optional START)
+(fn ID &optional START ICAL)
 """)
         emacs_defun(env, "maccalfw-remove-event", 1, 3, maccalfw_remove_event,
 """
