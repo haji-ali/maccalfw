@@ -1123,12 +1123,13 @@ abort `\\[maccalfw-event-kill]'."))
                 :value ,(cl-loop for day in (plist-get recur :week-days)
                                  collect (plist-get day :week-day)))
               (cl-loop
-               with lst = '(sunday monday tuesday wednesday thursday friday
-                                   saturday)
+               with lst = '("sunday" "monday" "tuesday"
+                            "wednesday" "thursday" "friday"
+                            "saturday")
                for w in lst
                collect `(item :format "%t "
-                              :tag ,(capitalize (substring (symbol-name w) 0 3))
-                              ,w)))
+                              :tag ,(capitalize (substring w 0 3))
+                              ,(intern (substring w 0 2)))))
 
              `(editable-field
                :field-key recurrence-month-days
@@ -1264,17 +1265,19 @@ abort `\\[maccalfw-event-kill]'."))
              :value group-value
              group-items))
 
+    (widget-insert "\n\n")
+
     (when-let (stat (plist-get event :status))
-      (widget-insert
-       (propertize "Status: " 'face 'maccalfw-event-field-names)
-       (symbol-name stat) "\n\n"))
+      (unless (equal stat "none")
+        (widget-insert
+         (propertize "Status: " 'face 'maccalfw-event-field-names)
+         (symbol-name stat) "\n\n")))
 
     (when-let (org (plist-get event :organizer))
       (widget-insert
        (propertize "Organizer: " 'face 'maccalfw-event-field-names)
        org "\n\n"))
 
-    (widget-insert "\n\n")
 
     (widget-create
      'editable-field

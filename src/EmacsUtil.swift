@@ -32,28 +32,29 @@ extension NSColor {
     }
 }
 
-func toEmacsVal_Enum<T : Hashable>
-  (_ env: PEmacsEnv,
-   _ map: [T: String],
-   _ t : T) -> emacs_value? {
-    if let emacsString = map[t] {
-        return emacs_intern(env, emacsString)
-    }
-    return nil
+protocol EmacsEnumCastable: EmacsCastable, Hashable {
+    static var enumMap: [Self: String] { get }
 }
 
-func fromEmacsVal_Enum<T : Hashable>
-  (_ env: PEmacsEnv,
-   _ map: [T: String],
-   _ v: emacs_value?) throws -> T {
-    guard let key = try emacs_symbol_to_string(env, v) else {
-        throw EmacsError.wrong_type_argument("Invalid key")
+extension EmacsEnumCastable {
+    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
+        if let emacsString = Self.enumMap[self] {
+            return emacs_intern(env, emacsString)
+        }
+        return nil
     }
 
-    if let enumvalue = map.first(where: { $0.value == key })?.key {
-        return enumvalue
+    static func fromEmacsVal(_ env: PEmacsEnv,
+                             _ val: emacs_value?) throws -> Self {
+        guard let key = emacs_symbol_to_string(env, val) else {
+            throw EmacsError.wrong_type_argument("Invalid key")
+        }
+
+        if let enumvalue = enumMap.first(where: { $0.value == key })?.key {
+            return enumvalue
+        }
+        throw EmacsError.wrong_type_argument("Unrecognized value: \(key)")
     }
-    throw EmacsError.wrong_type_argument("Unrecognized value: \(key)")
 }
 
 protocol EmacsCastable {
@@ -89,7 +90,7 @@ extension Bool : EmacsCastable {
     }
 
     static func fromEmacsVal(_ env: PEmacsEnv,
-                             _ val : emacs_value?) throws -> Self {
+                             _ val : emacs_value?) -> Self {
         return is_not_nil(env, val)
     }
 }
@@ -106,7 +107,7 @@ extension String : EmacsCastable {
     }
 
     static func fromEmacsVal(_ env: PEmacsEnv,
-                             _ val : emacs_value?) throws -> Self? {
+                             _ val : emacs_value?) -> Self? {
         if let val, is_not_nil(env, val) {
             var size: Int = 0
             if !env.pointee.copy_string_contents(env, val, nil, &size) {
@@ -140,7 +141,7 @@ extension Date : EmacsCastable {
     }
 
     static func fromEmacsVal(_ env: PEmacsEnv,
-                             _ val : emacs_value?) throws -> Date? {
+                             _ val : emacs_value?) -> Date? {
         // val should be a list of 3 elements having day, month and year.
         if let val, is_not_nil(env, val) {
             let time = env.pointee.extract_time(env, val)
@@ -175,6 +176,18 @@ extension Dictionary : EmacsCastable where Key == emacs_value?, Value == EmacsCa
                                   [key as EmacsCastable?,
                                    value]})
         return flatArgs.toEmacsVal(env)
+    }
+}
+
+class EmacsQuote : EmacsCastable {
+    let value: String
+
+    init(_ value: String) {
+        self.value = value
+    }
+
+    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
+        return emacs_intern(env, value)
     }
 }
 
@@ -230,10 +243,10 @@ func fromEmacsVal_list(_ env: PEmacsEnv,
 }
 
 func emacs_symbol_to_string(_ env: PEmacsEnv,
-                            _ val: emacs_value?) throws -> String? {
+                            _ val: emacs_value?) -> String? {
     if let val {
         let Qsymbol_name = emacs_intern(env, "symbol-name")
-        return try String.fromEmacsVal(env,emacs_funcall(env, Qsymbol_name, [val]))
+        return String.fromEmacsVal(env,emacs_funcall(env, Qsymbol_name, [val]))
     }
     return nil
 }
@@ -256,15 +269,15 @@ func fromEmacsVal_plist(_ env: PEmacsEnv,
 
     for index in stride(from: 0, to: list_data.count, by: 2) {
         if index+1 < list_data.count {
-            if let key = try emacs_symbol_to_string(env, list_data[index]),
+            if let key = emacs_symbol_to_string(env, list_data[index]),
                let value = list_data[index + 1] {
                 result[key.hasPrefix(":") ? String(key.dropFirst()) : key] = value
-                }
             }
-        else{
+        }
+        else {
             throw EmacsError.wrong_type_argument("plist should have an even number of elements")
         }
-        }
+    }
     return result
 }
 

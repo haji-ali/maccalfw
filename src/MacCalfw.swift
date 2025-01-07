@@ -6,78 +6,42 @@ let eventStore = EKEventStore()
 var Qt : emacs_value?
 var Qnil : emacs_value?
 
-
-extension EKEventAvailability : EmacsCastable  {
-    private static let enumMap: [Self : String] = [
+extension EKEventAvailability : EmacsEnumCastable  {
+    static let enumMap: [Self : String] = [
       .tentative: "tentative",
       .free: "free",
       .busy: "busy",
-      .unavailable: "unavailable"]
-
-    // TODO: I don't know if I can get away without repeating these definitions
-    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
-        return toEmacsVal_Enum(env, Self.enumMap, self)
-        }
-
-    static func fromEmacsVal(_ env: PEmacsEnv,
-                      _ val: emacs_value?) throws -> Self {
-        return try fromEmacsVal_Enum(env, Self.enumMap, val)
-    }
+      .unavailable: "unavailable",
+      .notSupported: "notSupported"]
 }
 
-extension EKRecurrenceFrequency : EmacsCastable  {
-    private static let enumMap: [Self: String] = [
+extension EKRecurrenceFrequency : EmacsEnumCastable  {
+    static let enumMap: [Self: String] = [
       .daily: "daily",
       .weekly: "weekly",
       .monthly: "monthly",
       .yearly: "yearly"]
 
-
-    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
-        return toEmacsVal_Enum(env, Self.enumMap, self)
-        }
-
-    static func fromEmacsVal(_ env: PEmacsEnv,
-                             _ val: emacs_value?) throws -> Self {
-        return try fromEmacsVal_Enum(env, Self.enumMap, val)
-    }
 }
 
-extension EKWeekday: EmacsCastable {
-    private static let enumMap: [Self: String] = [
-        .sunday: "sunday",
-        .monday: "monday",
-        .tuesday: "tuesday",
-        .wednesday: "wednesday",
-        .thursday: "thursday",
-        .friday: "friday",
-        .saturday: "saturday"
+extension EKWeekday : EmacsEnumCastable {
+    static let enumMap: [Self: String] = [
+        .sunday: "su",
+        .monday: "mo",
+        .tuesday: "tu",
+        .wednesday: "we",
+        .thursday: "th",
+        .friday: "fr",
+        .saturday: "sa"
     ]
-
-    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
-        return toEmacsVal_Enum(env, Self.enumMap, self)
-    }
-
-    static func fromEmacsVal(_ env: PEmacsEnv,
-                             _ val: emacs_value?) throws -> Self {
-        return try fromEmacsVal_Enum(env, Self.enumMap, val)
-    }
 }
 
-extension EKEventStatus : EmacsCastable  {
-    private static let enumMap: [Self: String] = [
+extension EKEventStatus : EmacsEnumCastable  {
+    static let enumMap: [Self: String] = [
+      .none: "none",
       .confirmed: "confirmed",
       .tentative: "tentative",
       .canceled: "cancelled"]
-
-    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
-        return toEmacsVal_Enum(env, Self.enumMap, self)
-    }
-
-    static func fromEmacsVal(_ env: PEmacsEnv,
-                      _ val: emacs_value?) throws -> Self {
-        return try fromEmacsVal_Enum(env, Self.enumMap, val)
-    }
 }
 
 extension EKEvent : EmacsCastable {
@@ -107,6 +71,60 @@ extension EKEvent : EmacsCastable {
 
         return toEmacsVal_plist(env, event_plist)
     }
+
+    func updateFromPList(_ env: PEmacsEnv,
+                         _ eventData: [String : emacs_value]) throws {
+        if let tmp = eventData["calendar-id"] {
+            let calendar_id = String.fromEmacsVal(env, tmp)
+            if let calendar_id,
+               let calendar = eventStore.calendar(withIdentifier: calendar_id) {
+                self.calendar = calendar
+            }
+            else {
+                throw EmacsError.error("Cannot retrieve calendar")
+            }
+        }
+
+        if let tmp = eventData["title"] {
+            self.title = String.fromEmacsVal(env, tmp)
+        }
+        if let tmp = eventData["recurrence"] {
+            self.recurrenceRules = try fromEmacsVal_list(env, tmp).map{
+                try EKRecurrenceRule.fromEmacsVal(env, $0)}
+        }
+        if let tmp = eventData["start"] {
+            self.startDate = Date.fromEmacsVal(env, tmp)
+        }
+        if let tmp = eventData["end"] {
+            self.endDate = Date.fromEmacsVal(env, tmp)
+        }
+        if let tmp = eventData["location"] {
+            let str = String.fromEmacsVal(env, tmp)
+            self.location = (str?.isEmpty ?? true) ? nil : str
+        }
+        if let tmp = eventData["notes"] {
+            self.notes = String.fromEmacsVal(env, tmp)
+        }
+        if let tmp = eventData["url"] {
+            let str = String.fromEmacsVal(env, tmp)
+            self.url = ((str?.isEmpty ?? true) ? nil
+                          : URL(string: str!))
+        }
+        if let tmp = eventData["timezone"] {
+            let str = String.fromEmacsVal(env, tmp)
+            self.timeZone = ((str?.isEmpty ?? true) ? nil
+                               : TimeZone(identifier: str!))
+        }
+
+        if let tmp = eventData["all-day-p"] {
+            self.isAllDay = is_not_nil(env, tmp)
+        }
+        if let tmp = eventData["availability"] {
+            self.availability = try EKEventAvailability.fromEmacsVal(env, tmp)
+        }
+        // Read-only: occurrenceDate, organizer, last_modified, created_date
+        // detached-p, status
+    }
 }
 
 extension EKRecurrenceDayOfWeek : EmacsCastable {
@@ -121,10 +139,7 @@ extension EKRecurrenceDayOfWeek : EmacsCastable {
     static func fromEmacsVal(_ env: PEmacsEnv,
                              _ val: emacs_value?) throws -> Self {
       let data = try fromEmacsVal_plist(env, val)
-      let dayOfTheWeek : EKWeekday  = try EKWeekday.fromEmacsVal(env, data["week-day"])
-      // if let tmp = data["week-day"] {
-      //     dayOfTheWeek = EKWeekday.fromEmacsVal(env, tmp)
-      // }
+      let dayOfTheWeek  = try EKWeekday.fromEmacsVal(env, data["week-day"])
       if let tmp = data["week-number"] {
           let weekNumber : Int = Int.fromEmacsVal(env, tmp) ?? 0
           return Self(dayOfTheWeek: dayOfTheWeek, weekNumber: weekNumber)
@@ -166,7 +181,7 @@ extension EKRecurrenceRule : EmacsCastable {
 
         // Simple rule
         if let tmp = data["end-date"],
-           let val = try Date.fromEmacsVal(env, tmp)  {
+           let val = Date.fromEmacsVal(env, tmp)  {
             end = EKRecurrenceEnd(end: val)
         }
         if let tmp = data["occurrence-count"],
@@ -235,7 +250,7 @@ private func AuthorizeCalendar(_ env: PEmacsEnv) throws {
 }
 
 private func getEKEvent(_ event_id : String,
-                        _ start: Date?) -> EKEvent? {
+                        _ start: Date?) throws -> EKEvent {
     let event_data = eventStore.event(withIdentifier: event_id)
     if let event_data, let start {
         if (event_data.startDate != start) {
@@ -246,11 +261,15 @@ private func getEKEvent(_ event_id : String,
                                             calendars: nil)
             let events = eventStore.events(matching: calendarEventsPredicate)
             // Find event with the same id and start date
-            return events.first(
-              where: { $0.eventIdentifier == event_id && $0.startDate == start})
+            if let event = (events.first(
+                              where: { $0.eventIdentifier == event_id &&
+                                         $0.startDate == start})){
+                return event
+            }
         }
+        return event_data
     }
-    return event_data
+    throw EmacsError.error("Failed to fetch event.")
 }
 
 private func maccalfw_get_calendars(_ env: PEmacsEnv?,
@@ -307,14 +326,14 @@ private func maccalfw_fetch_events(
                          env,
                          emacs_funcall(env,emacs_intern(env, "stringp"),
                                        [arg0])){
-                        calendar_ids = [try String.fromEmacsVal(env, arg0)]
+                        calendar_ids = [String.fromEmacsVal(env, arg0)]
                     }
                     else if is_not_nil(
                               env,
                               emacs_funcall(env,emacs_intern(env, "listp"),
                                             [arg0])){
-                        calendar_ids = try fromEmacsVal_list(env, arg0).map{
-                            try String.fromEmacsVal(env, $0)}
+                        calendar_ids = fromEmacsVal_list(env, arg0).map{
+                            String.fromEmacsVal(env, $0)}
                     }
                     else {
                         throw EmacsError.wrong_type_argument(
@@ -332,8 +351,8 @@ private func maccalfw_fetch_events(
                         throw EmacsError.error("Unable to fetch one of the calendars.")
                     }}
 
-                let start = try Date.fromEmacsVal(env, argStart)
-                let end = try Date.fromEmacsVal(env, argEnd)
+                let start = Date.fromEmacsVal(env, argStart)
+                let end = Date.fromEmacsVal(env, argEnd)
 
                 if let start, let end {
                     let calendarEventsPredicate =
@@ -368,14 +387,10 @@ private func maccalfw_get_event(
     if let env {
         do {
             try AuthorizeCalendar(env)
-            if let args, let eventId = try String.fromEmacsVal(env, args[0]) {
-                let start = nargs > 1 ? try Date.fromEmacsVal(env, args[1]) : nil
-                if let event_data = getEKEvent(eventId, start){
-                    return event_data.toEmacsVal(env)
-                }
-                else {
-                    throw EmacsError.error("Failed to fetch event.")
-                }
+            if let args, let eventId = String.fromEmacsVal(env, args[0]) {
+                let start = nargs > 1 ? Date.fromEmacsVal(env, args[1]) : nil
+                let event_data = try getEKEvent(eventId, start)
+                return event_data.toEmacsVal(env)
             }
         }
         catch {
@@ -395,79 +410,20 @@ private func maccalfw_update_event(
         do {
             if let args, let arg0 = args[0] {
                 try AuthorizeCalendar(env)
-                let start = nargs > 1 ? try Date.fromEmacsVal(env, args[1]) : nil
-                let future = nargs > 2 ? try Bool.fromEmacsVal(env, args[2]) : false
-
+                let start = nargs > 1 ? Date.fromEmacsVal(env, args[1]) : nil
+                let future = nargs > 2 ? Bool.fromEmacsVal(env, args[2]) : false
+                let event : EKEvent
                 let eventData = try fromEmacsVal_plist(env, arg0)
-                let eventId =
-                  try eventData["id"].map { try String.fromEmacsVal(env, $0) }
-                var event : EKEvent
 
-                if let eventId, let eventId {
-                    let old_event = getEKEvent(eventId, start)
-                    if let old_event {
-                        event = old_event
-                    }
-                    else{
-                        throw EmacsError.error("Cannot retrieve event")
-                    }
+                if let eventId = String.fromEmacsVal(env, eventData["id"]) {
+                    event = try getEKEvent(eventId, start)
                 }
                 else {
                     event = EKEvent(eventStore: eventStore)
                 }
 
-                if let tmp = eventData["calendar-id"] {
-                    let calendar_id = try String.fromEmacsVal(env, tmp)
-                    if let calendar_id,
-                       let calendar = eventStore.calendar(withIdentifier: calendar_id) {
-                        event.calendar = calendar
-                    }
-                    else {
-                        throw EmacsError.error("Cannot retrieve calendar")
-                    }
-                }
+                try event.updateFromPList(env, eventData)
 
-                if let tmp = eventData["title"] {
-                    event.title = try String.fromEmacsVal(env, tmp)
-                }
-                if let tmp = eventData["recurrence"] {
-                    event.recurrenceRules = try fromEmacsVal_list(env, tmp).map{
-                        try EKRecurrenceRule.fromEmacsVal(env, $0)}
-                }
-                if let tmp = eventData["start"] {
-                    event.startDate = try Date.fromEmacsVal(env, tmp)
-                }
-                if let tmp = eventData["end"] {
-                    event.endDate = try Date.fromEmacsVal(env, tmp)
-                }
-                if let tmp = eventData["location"] {
-                    let str = try String.fromEmacsVal(env, tmp)
-                    event.location = (str?.isEmpty ?? true) ? nil : str
-                }
-                if let tmp = eventData["notes"] {
-                    event.notes = try String.fromEmacsVal(env, tmp)
-                }
-                if let tmp = eventData["url"] {
-                    let str = try String.fromEmacsVal(env, tmp)
-                    event.url = ((str?.isEmpty ?? true) ? nil
-                                   : URL(string: str!))
-                }
-                if let tmp = eventData["timezone"] {
-                    let str = try String.fromEmacsVal(env, tmp)
-                    event.timeZone = ((str?.isEmpty ?? true) ? nil
-                                        : TimeZone(identifier: str!))
-                }
-
-                if let tmp = eventData["all-day-p"] {
-                    event.isAllDay = is_not_nil(env, tmp)
-                }
-                if let tmp = eventData["availability"] {
-                    event.availability = try EKEventAvailability.fromEmacsVal(env, tmp)
-                }
-
-
-                // Read-only: occurrenceDate, organizer, last_modified, created_date
-                // detached-p, status
 
                 do {
                     try eventStore.save(event,
@@ -495,23 +451,20 @@ private func maccalfw_remove_event(
     if let env, let args {
         do {
             try AuthorizeCalendar(env)
-            if let arg0 = args[0], let eventId = try String.fromEmacsVal(env, arg0) {
-                let start = nargs > 1 ? try Date.fromEmacsVal(env, args[1]) : nil
-                let future = nargs > 2 ? try Bool.fromEmacsVal(env, args[2]) : false
+            if let arg0 = args[0], let eventId = String.fromEmacsVal(env, arg0) {
+                let start = nargs > 1 ? Date.fromEmacsVal(env, args[1]) : nil
+                let future = nargs > 2 ? Bool.fromEmacsVal(env, args[2]) : false
+                let event = try getEKEvent(eventId, start)
 
-                if let event = getEKEvent(eventId, start) {
-                    do {
-                        try eventStore.remove(event,
-                                              span: future ? .futureEvents : .thisEvent,
-                                              commit: true)
-                        return Qt
-                    } catch {
-                        throw EmacsError.error("Failed to remove event with error: \(error.localizedDescription)")
-                    }
+                do {
+                    try eventStore.remove(event,
+                                          span: future ? .futureEvents : .thisEvent,
+                                          commit: true)
                 }
-                else {
-                    throw EmacsError.error("Cannot retrieve event")
+                catch {
+                    throw EmacsError.error("Failed to remove event with error: \(error.localizedDescription)")
                 }
+                return Qt
             }
         }
         catch {
