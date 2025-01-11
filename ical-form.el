@@ -26,6 +26,8 @@
 
 ;;; Code:
 
+;; TODO: The X-MACCALFW-* properties need to be abstracted
+
 (require 'wid-edit)
 (require 'org)
 
@@ -195,7 +197,6 @@ from ALIST."
                  `((DTSTART . ical-form--parse-ical-date)
                    (DTEND . ical-form--parse-ical-date)
                    (DTSTAMP . ical-form--parse-ical-date)
-                   (X-MACCALFW-OCCURENCE-DATE . ical-form--parse-ical-date)
                    (RRULE . ical-form--parse-ical-rrule)
                    (STATUS . ,parse-quote-string)
                    (X-MACCALFW-AVAILABILITY . ,parse-quote-string)))
@@ -549,45 +550,6 @@ EVENT defaults to the event data."
              (nthcdr 2 event))
         (setcar (nthcdr 2 event) 1))
     (mouse-drag-region event)))
-
-(defun ical-form-new-event (event-data)
-  "Create an events-details buffer for a new event.
-EVENT-DATA contains the initial event information."
-  (interactive
-   (list
-    (if (and (derived-mode-p 'cfw:calendar-mode)
-             ;; TODO: Check that the view is indeed a block
-             ;; (cfw:component-view (cfw:cp-get-component))
-             ;; should return a block view
-             (fboundp 'calfw-blocks-region-to-time))
-        (if-let ((event (and current-prefix-arg
-                             (get-text-property (point) 'cfw:event)))
-                 (old-event-data (cfw:event-data event)))
-            (cl-loop for (key val) on
-                     old-event-data by #'cddr
-                     if (member key '(:start :end :title
-                                             :all-day-p
-                                             :timezone
-                                             :location
-                                             :availability
-                                             :url
-                                             :notes))
-                     append (list key val))
-          (cl-destructuring-bind (start end all-day)
-              (calfw-blocks-region-to-time)
-            (list :start start
-                  :end (or end (time-add start 3600))
-                  :all-day-p all-day)))
-      (list :start (current-time)
-            :end (time-add (current-time) 3600)))))
-  (ical-form-open event-data))
-
-(defun ical-form-goto-details (event)
-  "Open event details for the calfw EVENT."
-  (interactive
-   (list (or (get-text-property (point) 'cfw:event)
-             (error "No event at location"))))
-  (ical-form-open (cfw:event-data event)))
 
 (defun ical-form-read-only (&rest _junk)
   "Ignoring the arguments, signal an error."

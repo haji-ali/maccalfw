@@ -212,6 +212,10 @@ This command displays any CALENDARS obtained using
              #'string-lessp)))
 
 
+;; TODO: maccalfw-delete-event should be here, but at the moment
+;; it uses ical-form to check if we should modify future events
+;; this should be abstract somehow.
+
 (defun maccalfw-delete-event (event)
   "Delete calfw EVENT."
   (interactive
@@ -228,6 +232,46 @@ This command displays any CALENDARS obtained using
         (message "Event deleted")
         (cfw:refresh-calendar-buffer nil))
       (error "Deleting event failed")))
+
+(defun maccalfw-event-new-event (event-data)
+  "Create an events-details buffer for a new event.
+EVENT-DATA contains the initial event information."
+  ;; TODO: Needs updating to ical form
+  (interactive
+   (list
+    (if (and (derived-mode-p 'cfw:calendar-mode)
+             ;; TODO: Check that the view is indeed a block
+             ;; (cfw:component-view (cfw:cp-get-component))
+             ;; should return a block view
+             (fboundp 'calfw-blocks-region-to-time))
+        (if-let ((event (and current-prefix-arg
+                             (get-text-property (point) 'cfw:event)))
+                 (old-event-data (cfw:event-data event)))
+            (cl-loop for item in old-event-data
+                     if (member (car item) '(;
+                                             DTSTART DTEND
+                                             SUMMARY
+                                             LOCATION
+                                             X-AVAILABILITY
+                                             URL
+                                             DESCRIPTION))
+                     collect item)
+          (cl-destructuring-bind (start end all-day)
+              (calfw-blocks-region-to-time)
+            (list (cons 'DTSTART (ical-form--format-ical-date start all-day))
+                  (cons 'DTEND (ical-form--format-ical-date (or end (time-add start 3600))
+                                                            all-day)))))
+      (list (cons 'DTSTART (ical-form--format-ical-date (current-time)))
+            (cons 'DTEND (ical-form--format-ical-date (time-add (current-time)
+                                                                3600)))))))
+  (ical-form-open event-data))
+
+(defun maccalfw-event-goto-details (event)
+  "Open event details for the calfw EVENT."
+  (interactive
+   (list (or (get-text-property (point) 'cfw:event)
+             (error "No event at location"))))
+  (ical-form-open (cfw:event-data event)))
 
 (provide 'maccalfw)
 ;;; maccalfw.el ends here
