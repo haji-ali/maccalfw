@@ -539,18 +539,6 @@ case the end time/date is set."
   (ical-form-mode)
   (ical-form-rebuild-buffer event t))
 
-(defun ical-form-mouse-down (event)
-  "Call `mouse-drag-region' but disable double clicking.
-Assigning this commend to [down-mouse-1] ensures the commands
-assigned to [double-mouse-1] is called.
-EVENT defaults to the event data."
-  (interactive "e")
-  (let (mouse-selection-click-count)
-    (if (and (consp event)
-             (nthcdr 2 event))
-        (setcar (nthcdr 2 event) 1))
-    (mouse-drag-region event)))
-
 (defun ical-form-read-only (&rest _junk)
   "Ignoring the arguments, signal an error."
   (unless inhibit-read-only
@@ -1124,9 +1112,9 @@ abort `\\[ical-form-kill]'."))
                       (format "%d" occurrence-count))
                     ""))
              ;; TODO: Unimplemented features:
-             ;; - How do we handle :week-number?
+             ;; - How do we handle BYDAY's week-number (in cdr)?
              ;; - set-positions.
-             ;; - week-first-day? Indicates which day of the week the recurrence
+             ;; - WKST Indicates which day of the week the recurrence
              ;; rule treats as the first day of the week.
              ))
            (group-value

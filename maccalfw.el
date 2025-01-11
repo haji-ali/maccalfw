@@ -233,7 +233,7 @@ This command displays any CALENDARS obtained using
         (cfw:refresh-calendar-buffer nil))
       (error "Deleting event failed")))
 
-(defun maccalfw-event-new-event (event-data)
+(defun maccalfw-new-event (event-data)
   "Create an events-details buffer for a new event.
 EVENT-DATA contains the initial event information."
   (interactive
@@ -258,19 +258,41 @@ EVENT-DATA contains the initial event information."
           (cl-destructuring-bind (start end all-day)
               (calfw-blocks-region-to-time)
             (list (cons 'DTSTART (ical-form--format-ical-date start all-day))
-                  (cons 'DTEND (ical-form--format-ical-date (or end (time-add start 3600))
-                                                            all-day)))))
+                  (cons 'DTEND (ical-form--format-ical-date
+                                (or end (time-add start 3600))
+                                all-day)))))
       (list (cons 'DTSTART (ical-form--format-ical-date (current-time)))
             (cons 'DTEND (ical-form--format-ical-date (time-add (current-time)
                                                                 3600)))))))
   (ical-form-open event-data))
 
-(defun maccalfw-event-goto-details (event)
+(defun maccalfw-goto-event-details (event)
   "Open event details for the calfw EVENT."
   (interactive
    (list (or (get-text-property (point) 'cfw:event)
              (error "No event at location"))))
   (ical-form-open (cfw:event-data event)))
+
+
+(defun maccalfw-mouse-down-disable-dbl-click (event)
+  "Call `mouse-drag-region' but disable double clicking.
+Assigning this commend to [down-mouse-1] ensures the commands
+assigned to [double-mouse-1] is called.
+EVENT defaults to the event data."
+  (interactive "e")
+  (let (mouse-selection-click-count)
+    (if (and (consp event)
+             (nthcdr 2 event))
+        (setcar (nthcdr 2 event) 1))
+    (mouse-drag-region event)))
+
+;; Temporary aliases that should be marked obsolete instead
+(defalias 'maccalfw-event-new-event 'maccalfw-new-event)
+(defalias 'maccalfw-event-goto-details 'maccalfw-goto-event-details)
+(defalias 'maccalfw-event-delete-event 'maccalfw-delete-event)
+(defalias 'maccalfw-event-mouse-down 'maccalfw-mouse-down-disable-dbl-click)
+(defalias 'maccalfw-event-save-hook 'ical-form-save-hook)
+(defalias 'maccalfw-event-open 'ical-form-open)
 
 (provide 'maccalfw)
 ;;; maccalfw.el ends here
