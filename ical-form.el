@@ -41,10 +41,14 @@ Takes one argument which is the new event data."
   "If non-nil, modifying events with recurrences applies to future events.
 Special value \\='ask, prompts the user.")
 
+;; TODO: Is this actually needed?
 (defvar ical-form-get-event-function 'maccalfw-get-event)
+;; TODO: Should instead pass old and new data
+(defvar ical-form-update-event-function 'maccalfw-update-event)
+;; TODO: These should be just passed as arguments
 (defvar ical-form-get-calendars-function 'maccalfw-get-calendars)
 (defvar ical-form-get-timezones-function 'maccalfw-timezones)
-(defvar ical-form-update-event-function 'maccalfw-update-event)
+
 
 (defface ical-form-notes-field
   '((t

@@ -286,7 +286,7 @@ EVENT defaults to the event data."
         (setcar (nthcdr 2 event) 1))
     (mouse-drag-region event)))
 
-;; Temporary aliases that should be marked obsolete instead
+;; TODO: Temporary aliases that should be marked obsolete instead
 (defalias 'maccalfw-event-new-event 'maccalfw-new-event)
 (defalias 'maccalfw-event-goto-details 'maccalfw-goto-event-details)
 (defalias 'maccalfw-event-delete-event 'maccalfw-delete-event)
