@@ -182,29 +182,128 @@ next day."
   (list (decoded-time-hour time)
         (decoded-time-minute time)))
 
+(defun maccalfw--format-ical-date (date &optional all-day time-zone-id)
+  "Convert DATE to iCal list format.
+If ALL-DAY is non-nil, return all-day format. TIME-ZONE-ID specifies the timezone."
+  (let* ((params (cond
+                  (all-day (list 'VALUE "DATE"))
+                  (time-zone-id (list 'TZID time-zone-id))
+                  (t nil)))
+         (format (cond
+                  (all-day "%Y%m%d")
+                  (time-zone-id "%Y%m%dT%H%M%S")
+                  (t "%Y%m%dT%H%M%SZ")))
+         (time-string (format-time-string format date t)))
+    (list params time-string)))
+
+(defun maccalfw--parse-ical-date (ical-list)
+  "Parse an iCal list format ICAL-LIST into date components.
+Returns a list (DATE (ALL-DAY-P val) (TZ val))."
+  (let ((params (car ical-list))
+        (date-string (cadr ical-list)))
+    (let* ((is-all-day (and params
+                            (eq (car params) 'VALUE)
+                            (equal (cadr params) "DATE")))
+           (time-zone-id (and params
+                              (eq (car params) 'TZID)
+                              (cadr params)))
+           (parsed-date (parse-time-string
+                         (concat
+                          date-string
+                          (if is-all-day
+                              "T000000"
+                            "")))))
+      (if parsed-date
+          (list (apply 'encode-time parsed-date)
+                `(ALL-DAY-P . ,is-all-day)
+                `(TZID . ,time-zone-id))
+        (error "Failed to parse iCal list")))))
+
+(defun maccalfw--parse-ical-rrule (ical-list)
+  "Parse an iCal list format ICAL-LIST into date components.
+Returns a list (DATE IS-ALL-DAY TIME-ZONE)."
+  (let ((trim "[[:space:]]*"))
+    (append
+     (list 'rrule)
+     (mapcar
+      (lambda (item)
+        (let* ((key-val (string-split item "=" t trim))
+               (value (string-join (cdr key-val) "="))
+               (key (intern (car key-val))))
+          (cons key
+                (cl-case key
+                  (UNTIL (encode-time (parse-time-string value)))
+                  (FREQ (intern (downcase value)))
+                  ((COUNT INTERVAL)
+                   (string-to-number value))
+                  (BYDAY
+                   (mapcar
+                    (lambda (x)
+                      (save-match-data
+                        (string-match
+                         "^\\(?:\\([-+]?[[:digit:]]+\\)\\)?\\([A-Z]+\\)$"
+                         x)
+                        (cons (intern (match-string 2 x))
+                              (when (match-string 1 x)
+                                (string-to-number (match-string 1 x))))))
+                    (string-split value "," t trim)))
+                  (otherwise (mapcar
+                              'string-to-number
+                              (string-split value "," t trim)))))))
+      (string-split (cadr ical-list) ";" t trim)))))
+
+(defun maccalfw-event--get (event prop &optional subprop)
+  "Get property PROP from EVENT.
+
+If SUBPROP is nil, return the element value of PROP. If SUBPROP
+is t, return (PROP-VALUE ALIST) where ALIST is a a list of
+subproperties. Otherwise, return value corresponding to SUBPROP
+from ALIST."
+  (when-let (prop-val (alist-get prop event))
+    (let* ((parse-quote-string (lambda (x) (list (intern
+                                                  (downcase (cadr x))))))
+           (trans
+            (or (alist-get
+                 prop
+                 `((DTSTART . maccalfw--parse-ical-date)
+                   (DTEND . maccalfw--parse-ical-date)
+                   (DTSTAMP . maccalfw--parse-ical-date)
+                   (X-MACCALFW-OCCURENCE-DATE . maccalfw--parse-ical-date)
+                   (RRULE . maccalfw--parse-ical-rrule)
+                   (STATUS . ,parse-quote-string)
+                   (X-MACCALFW-AVAILABILITY . ,parse-quote-string)))
+                (lambda (x) (list (cadr x)))))
+           (prop-val (funcall trans prop-val)))
+      (if (eq subprop 't)
+          prop-val
+        (if subprop
+            (alist-get subprop (cdr prop-val))
+          (car prop-val))))))
+
 (defun maccalfw--convert-event (event)
   "Convert an EVENT to a calfw event.
 The event is returned `maccalfw-fetch-events'."
-  (let* ((start (decode-time (plist-get event :start)))
-        (end (decode-time (plist-get event :end)))
-         (all-day-p (plist-get event :all-day-p))
+  (let* ((dt-start (maccalfw-event--get event 'DTSTART t))
+         (start (decode-time (car dt-start)))
+         (end (decode-time (maccalfw-event--get event 'DTEND)))
+         (all-day-p (alist-get 'ALL-DAY-P (cdr dt-start)))
          (args
           (list
-     :start-date  (maccalfw--decode-date start)
-     :start-time  (unless all-day-p
-                    (maccalfw--decode-time start))
-     :end-date    (when all-day-p
-                    (maccalfw--decode-date end))
-     :end-time    (unless all-day-p
-                    (maccalfw--decode-time end))
-     :title       (plist-get event :title)
-     :location    (plist-get event :location)
-           :description (plist-get event :summary))))
+           :start-date  (maccalfw--decode-date start)
+           :start-time  (unless all-day-p
+                          (maccalfw--decode-time start))
+           :end-date    (when all-day-p
+                          (maccalfw--decode-date end))
+           :end-time    (unless all-day-p
+                          (maccalfw--decode-time end))
+           :title       (maccalfw-event--get event 'SUMMARY)
+           :location    (maccalfw-event--get event 'LOCATION)
+           :description (maccalfw-event--get event 'DESCRIPTION))))
     (when (and (alist-get 'status (cl-struct-slot-info 'cfw:event))
                (alist-get 'data (cl-struct-slot-info 'cfw:event)))
       (setq args
             (append args (list
-     :status       (plist-get event :status)
+                          :status (maccalfw-event--get event 'STATUS)
                           :data        event))))
     (apply 'make-cfw:event args)))
 
@@ -293,11 +392,11 @@ Warn if the buffer is modified and offer to save."
     (set-buffer-modified-p nil)
     (quit-window t)))
 
-(cl-defun maccalfw--diff-plist (A B
-                                  &key
-                                  symmetric
-                                  test
-                                  test-plist)
+(cl-defun maccalfw-event--diff-plist (A B
+                                        &key
+                                        symmetric
+                                        test
+                                        test-plist)
   "Compare plists A and B and return differing properties.
 If SYMMETRIC t, return properties in B not in A. TEST-PLIST is a
 plist mapping property names to comparison functions, or defaults
@@ -331,6 +430,46 @@ values which are different, or nil if no values are different."
         (list result-A result-B)
       nil)))
 
+(cl-defun maccalfw-event--diff-alist (A B
+                                        &key
+                                        symmetric
+                                        test
+                                        test-plist)
+  "Compare alists A and B and return differing properties.
+If SYMMETRIC t, return properties in B not in A. TEST-PLIST is a
+plist mapping property names to comparison functions, or defaults
+to TEST or \\='eq for all properties. Returns a cons of A and B
+values which are different, or nil if no values are different."
+  (let ((test (or test 'equal))
+        (result-A nil)
+        (result-B nil)
+        (AA A))
+    ;; Process A
+    (while A
+      (let* ((kv (car A))
+             (key (car kv))
+             (value-a (cdr kv))
+             (value-b (alist-get key B))
+             (cmp (or (plist-get test-plist key) test)))
+        (unless (funcall cmp value-a value-b)
+          (setq result-A (append result-A (list (cons key value-a))))
+          (setq result-B (append result-B (list (cons key value-b))))))
+      (setq A (cdr A)))
+    ;; Process B for keys not in A
+    (while (and symmetric B)
+      (let* ((kv (car B))
+             (key (car kv))
+             (value-b (cdr kv))
+             (cmp (or (plist-get test-plist key) test)))
+        (unless (or (alist-get key AA) ;; was processed already
+                    (funcall cmp nil value-b))
+          (setq result-A (append result-A (list (cons key nil))))
+          (setq result-B (append result-B (list (cons key value-b))))))
+      (setq B (cddr B)))
+    (if (or result-A result-B)
+        (list result-A result-B)
+      nil)))
+
 (defun maccalfw-event-save (&optional duplicate)
   "Save event.
 If DUPLICATE is non-nil, save the event as a new one."
@@ -354,82 +493,82 @@ If DUPLICATE is non-nil, save the event as a new one."
                    (maccalfw-event--value 'end-date widgets)
                  (maccalfw-event--value 'start-date widgets))
                tz))
-         (old-id (unless duplicate (plist-get old-data :id)))
+         (old-id (unless duplicate
+                   (maccalfw-event--get old-data 'UID)))
          (new-data
-          (list
-           :id old-id
-           :calendar-id (maccalfw-event--value 'calendar-id widgets)
-           :title (widget-value title-wid)
-           :timezone (if all-day "" tz)
-           :all-day-p all-day
-           :url (maccalfw-event--value 'url widgets)
-           :recurrence (when (maccalfw-event--value 'recurrence-p widgets)
-                         (list (maccalfw-event--value 'recurrence widgets)))
-           :location (maccalfw-event--value 'location widgets)
-           :availability (maccalfw-event--value 'availability widgets)
-           :notes (maccalfw-event--value 'notes widgets)))
+          `((UID nil ,old-id)
+            (X-MACCALFW-CALID nil ,(maccalfw-event--value 'calendar-id widgets))
+            (SUMMARY nil ,(widget-value title-wid))
+            (URL nil ,(maccalfw-event--value 'url widgets))
+            (RRULE nil
+                   ,(when (maccalfw-event--value 'recurrence-p widgets)
+                      (maccalfw-event--value 'recurrence widgets)))
+            (LOCATION nil ,(maccalfw-event--value 'location widgets))
+            (DESCRIPTION nil ,(maccalfw-event--value 'notes widgets))
+            (X-MACCALFW-AVAILABILITY
+             nil
+             ,(upcase (symbol-name
+                       (maccalfw-event--value 'availability widgets))))))
          (new-event (null old-id)))
-    (when (plist-get old-data :read-only)
+    (when (maccalfw-event--get old-data 'X-MACCALFW-READ-ONLY)
       (user-error "Event is not editable.?"))
 
-    ;; Only keep modified data
-    (cl-flet ((str-null-p (x)
-                (if (stringp x) (string= x "") (null x))))
-      (setq new-data
-            (car
-             (maccalfw--diff-plist
-              new-data
-              old-data
-              :test (lambda (x y)
-                      ;; If there's no old event, then as long as x is
-                      ;; non-nil, consider it unique.
-                      ;; If there's an old event, then consider it unique
-                      ;; Either x is nil (or empty) and y is not nil.
-                      ;; or x is not nil (nor empty) and different
-                      ;; from y.
-                      (and
-                       (or (not new-event) (str-null-p x))
-                       (or new-event
-                           (and (or (not (str-null-p x)) (not y))
-                                (or (str-null-p x) (equal x y))))))
-              :test-plist `(:recurrence
-                            ,(lambda (x y)
-                               (not (maccalfw--diff-plist
-                                     (car-safe x)
-                                     (car-safe y)
-                                     :test 'seq-set-equal-p
-                                     :test-plist
-                                     '(;
-                                       ;; ignore this value
-                                       :week-first-day always
-                                       :end-date equal
-                                       :occurrence-count eq
-                                       :interval eq
-                                       :frequency eq)))))))))
-    (unless (and (not new-event)
-                 (time-equal-p start (plist-get old-data :start)))
-      (setq new-data (plist-put new-data :start start)))
-    (unless (and (not new-event)
-                 (time-equal-p end (plist-get old-data :end)))
-      (setq new-data
-            (plist-put new-data :end end)))
-    (when (and new-data old-id)
-      (setq new-data
-            (plist-put new-data :id old-id)))
+    (setq new-data
+          (append
+           new-data
+           (list (cons 'DTSTART (maccalfw--format-ical-date start all-day tz))
+                 (cons 'DTEND (maccalfw--format-ical-date end all-day tz)))))
+
+
+    (cl-flet ((non-trivial-p (x)
+                ;; If the list is just nil empty strings, it's trivial
+                (cl-some
+                 (lambda (z) (if (stringp z) (not (string= z "")) z)) x)))
+      (if new-event
+          ;; Keep all fields except those which are null
+          (setq new-data
+                (cl-loop for x in new-data
+                         if (non-trivial-p (cdr x))
+                         collect x))
+        (setq new-data
+              (car
+               (maccalfw-event--diff-alist
+                new-data
+                old-data
+                :test (lambda (x y)
+                        (equal (and (non-trivial-p x) x)
+                               (and (non-trivial-p y) y)))
+                :test-plist `(RRULE
+                              (lambda (x y)
+                                (not (maccalfw-event--diff-alist
+                                      (and x
+                                           (cdr (maccalfw--parse-ical-rrule x)))
+                                      (and y
+                                           (cdr (maccalfw--parse-ical-rrule y)))
+                                      :test 'seq-set-equal-p
+                                      :test-plist
+                                      '(;
+                                        ;; ignore this value
+                                        WKST always
+                                        UNTIL equal
+                                        COUNT eq
+                                        INTERVAL eq
+                                        FREQ equal))))))))))
     (if new-data
         ;; if old event has a recurrence, check with use if all future events
         ;; should be editied or just the current one
         (let ((future
-               (and (or (plist-get old-data :recurrence)
-                        (plist-get new-data :recurrence))
+               (and (or (maccalfw-event--get old-data 'RRULE)
+                        (maccalfw-event--get new-data 'RRULE))
                     ;; If changing recurrence rule, then we should modify all
                     ;; future events. Otherwise, we should ask the user
-                    (or (plist-get new-data :recurrence)
+                    (or (maccalfw-event--get new-data 'RRULE)
                         (maccalfw-event-modify-future-events-p)))))
           (widget-put title-wid
                       :event-data
                       (maccalfw-update-event new-data
-                                             (plist-get old-data :start)
+                                             (maccalfw-event--get new-data
+                                                                 'DTSTART)
                                              future))
           (when (called-interactively-p 'interactive)
             (message "Event saved."))
@@ -654,9 +793,9 @@ the user, displaying the message PROMPT."
   (or (prog1
           (let ((ev (cfw:event-data event)))
             (maccalfw-remove-event
-             (plist-get ev :id)
-             (plist-get ev :start)
-             (if (plist-get ev :recurrence)
+             (maccalfw-event--get ev 'UID)
+             (maccalfw-event--get ev 'DTSTART)
+             (if (maccalfw-event--get ev 'RRULE)
                  (maccalfw-event-modify-future-events-p)
                nil)))
         (message "Event deleted")
@@ -921,7 +1060,7 @@ it."
    (let* ((widgets (maccalfw-event--get-widgets))
           (title-wid (maccalfw-event--find-widget 'title widgets))
           (event (widget-get title-wid :event-data)))
-     (list (or (maccalfw-get-event (plist-get event :id))
+     (list (or (maccalfw-get-event (maccalfw-event--get event 'UID))
                event)
            nil)))
   (when (and
@@ -948,8 +1087,12 @@ abort `\\[maccalfw-event-kill]'."))
 
 (defun maccalfw-event--create-form (event)
   "Create form in current buffer corresponding to EVENT."
-  (let ((timezone (or (plist-get event :timezone)
-                      (car maccalfw-event--default-timezone))))
+  (let* ((cal-id (maccalfw-event--get event 'X-MACCALFW-CALID))
+         (dt-start (maccalfw-event--get event 'DTSTART t))
+         (timezone (or (alist-get 'TZID (cdr dt-start))
+                       (car maccalfw-event--default-timezone)))
+         (all-day-p (alist-get 'ALL-DAY-P (cdr dt-start)))
+         (end (maccalfw-event--get event 'DTEND)))
     (widget-insert "\n\n")
 
     (widget-create 'editable-field
@@ -958,14 +1101,14 @@ abort `\\[maccalfw-event-kill]'."))
                    :keymap maccalfw-event-field-map
                    :value-face 'maccalfw-event-title-field
                    :format "%v \n" ; Text after the field!
-                   (or (plist-get event :title) ""))
+                   (or (maccalfw-event--get event 'SUMMARY) ""))
 
     (let* ((cals (maccalfw-get-calendars))
            (options (cl-loop
                      for x in cals
                      when (or (plist-get x :editable)
                               (equal (plist-get x :id)
-                                     (plist-get event :calendar-id)))
+                                     cal-id))
                      collect
                      `(item :tag ,(plist-get x :title)
                             :value ,(plist-get x :id)
@@ -976,7 +1119,7 @@ abort `\\[maccalfw-event-kill]'."))
        :field-key 'calendar-id
        :tag "Calendar"
        :format "%[%t%]: %v\n\n"
-       :value (or (plist-get event :calendar-id)
+       :value (or cal-id
                   (plist-get
                    (cl-find-if
                     (lambda (x) (plist-get x :default))
@@ -995,32 +1138,28 @@ abort `\\[maccalfw-event-kill]'."))
                    :format " %v "
                    :size 10
                    (and event
-                        (format-time-string "%F"
-                                            (plist-get event :start))))
+                        (format-time-string "%F" (car dt-start))))
 
     (widget-create 'editable-field
                    :field-key 'end-date
                    :keymap maccalfw-event-field-map
                    :format "  --    %v   "
                    :size 10
-                   (format-time-string "%F"
-                                       (plist-get event :end)))
+                   (format-time-string "%F" (car end)))
     (widget-create 'editable-field
                    :field-key 'start-time
                    :keymap maccalfw-event-field-map
                    :format " %v -- "
                    :size 6
                    (maccalfw-event--format-time
-                    (plist-get event :start)
+                    (car dt-start)
                     timezone))
     (widget-create 'editable-field
                    :field-key 'end-time
                    :keymap maccalfw-event-field-map
                    :format " %v   "
                    :size 6
-                   (maccalfw-event--format-time
-                    (plist-get event :end)
-                    timezone))
+                   (maccalfw-event--format-time end timezone))
     (widget-create 'checkbox
                    :field-key 'all-day
                    :format " %[%v%] All day\n\n"
@@ -1028,7 +1167,7 @@ abort `\\[maccalfw-event-kill]'."))
                    :hs (maccalfw-event--checkbox-hs
                         'end-date
                         '(start-time end-time timezone))
-                   (plist-get event :all-day-p))
+                   all-day-p)
 
     (unless maccalfw-event--timezones
       (setq
@@ -1062,7 +1201,8 @@ abort `\\[maccalfw-event-kill]'."))
      :field-key 'availability
      :entry-format "%b %v "
      :format "%v\n\n"
-     :value (or (plist-get event :availability) 'busy)
+     :value (or
+             (maccalfw-event--get event 'X-AVAILABLITY) 'busy)
      '(item :format "%[Tentative%] " :value tentative)
      '(item :format "%[Free%] " :value free)
      '(item :format "%[Busy%] " :value busy)
@@ -1076,9 +1216,9 @@ abort `\\[maccalfw-event-kill]'."))
      (concat
       (propertize "Location: " 'face 'maccalfw-event-field-names)
       "%v\n")
-     (or (plist-get event :location) ""))
+     (or (maccalfw-event--get event 'LOCATION) ""))
 
-    (let* ((recur (car-safe (plist-get event :recurrence)))
+    (let* ((recur (cdr (maccalfw-event--get event 'RRULE t)))
            (group-items
             (list
              `(editable-field
@@ -1088,23 +1228,23 @@ abort `\\[maccalfw-event-kill]'."))
                :format "every %v "
                :size 5
                ,(or (when-let (interval
-                               (plist-get recur :interval))
+                               (alist-get 'INTERVAL recur))
                       (format "%d" interval))
                     "1"))
 
              `(radio-button-choice
-               :field-key recurrence-frequency
+               :field-key recurrence-freq
                :entry-format "%b %v"
                :format "%v\n"
-               :hs ((weekly . recurrence-week-days)
-                    (monthly recurrence-week-days
-                             recurrence-month-days)
-                    (yearly recurrence-week-days
-                            recurrence-year-months
-                            recurrence-year-weeks
-                            recurrence-year-days))
+               :hs ((weekly . recurrence-byday)
+                    (monthly recurrence-byday
+                             recurrence-bymonthday)
+                    (yearly recurrence-byday
+                            recurrence-bymonth
+                            recurrence-byweekno
+                            recurrence-byyearday))
                :notify maccalfw-event--hs-action
-               :value ,(or (plist-get recur :frequency)
+               :value ,(or (alist-get 'FREQ recur)
                            'weekly)
                (item :format "%[Day%] " :value daily)
                (item :format "%[Week%] " :value weekly)
@@ -1113,40 +1253,36 @@ abort `\\[maccalfw-event-kill]'."))
 
              (append
               `(checklist
-                :field-key recurrence-week-days
+                :field-key recurrence-byday
                 :indent 3
                 :format "on %v\n"
-                :value-to-external
-                (lambda (widget value)
-                  (cl-loop for v in value
-                           collect (list :week-day v)))
-                :value ,(cl-loop for day in (plist-get recur :week-days)
-                                 collect (plist-get day :week-day)))
+                :value ,(cl-loop for day in (alist-get 'BYDAY recur)
+                                 collect (car day)))
               (cl-loop
-               with lst = '("sunday" "monday" "tuesday"
-                            "wednesday" "thursday" "friday"
-                            "saturday")
+               with lst = '("SUNDAY" "MONDAY" "TUESDAY"
+                            "WEDNESDAY" "THURSDAY" "FRIDAY"
+                            "SATURDAY")
                for w in lst
                collect `(item :format "%t "
                               :tag ,(capitalize (substring w 0 3))
                               ,(intern (substring w 0 2)))))
 
              `(editable-field
-               :field-key recurrence-month-days
+               :field-key recurrence-bymonthday
                :value-to-external maccalfw-event--parse-integer-list-field
                :keymap maccalfw-event-field-map
                :format "on days of month [-31 to 31]: %v\n"
                :size 10
-               ,(or (when-let (mdays (plist-get recur :month-days))
+               ,(or (when-let (mdays (alist-get 'BYMONTHDAY recur))
                       (string-join (cl-loop for i in mdays
                                             collect (number-to-string i))
                                    ", "))
                     ""))
              (append
               `(checklist
-                :field-key recurrence-year-months
+                :field-key recurrence-bymonth
                 :format "on %v\n"
-                :value ,(plist-get recur :year-months))
+                :value ,(alist-get 'BYMONTH recur))
               (cl-loop
                with lst = parse-time-months
                with len = (1+ (length lst))
@@ -1157,23 +1293,23 @@ abort `\\[maccalfw-event-kill]'."))
                               :tag ,(capitalize (car w))
                               ,(cdr w))))
              `(editable-field
-               :field-key recurrence-year-weeks
+               :field-key recurrence-byweekno
                :value-to-external maccalfw-event--parse-integer-list-field
                :keymap maccalfw-event-field-map
                :format "on weeks of year [-53 to 53]: %v\n"
                :size 10
-               ,(or (when-let (mdays (plist-get recur :year-weeks))
+               ,(or (when-let (mdays (alist-get 'BYWEEKNO recur))
                       (string-join (cl-loop for i in mdays
                                             collect (number-to-string i))
                                    ", "))
                     ""))
              `(editable-field
-               :field-key recurrence-year-days
+               :field-key recurrence-byyearday
                :value-to-external maccalfw-event--parse-integer-list-field
                :keymap maccalfw-event-field-map
                :format "on days of year [-366 to 366]: %v\n"
                :size 10
-               ,(or (when-let (mdays (plist-get recur :year-days))
+               ,(or (when-let (mdays (alist-get 'BYYEARDAY recur))
                       (string-join (cl-loop for i in mdays
                                             collect (number-to-string i))
                                    ", "))
@@ -1184,10 +1320,10 @@ abort `\\[maccalfw-event-kill]'."))
                :entry-format "%b %v"
                :format "%v"
                :hs ((on . recurrence-end-date)
-                    (after . recurrence-occurrence-count))
+                    (after . recurrence-count))
                :notify maccalfw-event--hs-action
-               :value ,(or (and (plist-get recur :end-date) 'on)
-                           (and (plist-get recur :occurrence-count) 'after))
+               :value ,(or (and (alist-get 'UNTIL recur) 'on)
+                           (and (alist-get 'COUNT recur) 'after))
                (item :format "%[Until%] " :value on)
                (item :format "%[After%] " :value after))
 
@@ -1199,18 +1335,18 @@ abort `\\[maccalfw-event-kill]'."))
                ;; change as text is added to it
                :format " %v "
                :size 10
-               ,(or (when-let (end-date (plist-get recur :end-date))
+               ,(or (when-let (end-date (alist-get 'UNTIL recur))
                       (format-time-string "%F" end-date))
                     ""))
 
              `(editable-field
-               :field-key recurrence-occurrence-count
+               :field-key recurrence-count
                :value-to-external maccalfw-event--parse-integer-field
                :keymap maccalfw-event-field-map
                :format " %v occurrences"
                :size 5
                ,(or (when-let (occurrence-count
-                               (plist-get recur :occurrence-count))
+                               (alist-get 'COUNT recur))
                       (format "%d" occurrence-count))
                     ""))
              ;; TODO: Unimplemented features:
@@ -1231,7 +1367,7 @@ abort `\\[maccalfw-event-kill]'."))
        :format "%[%v%] Repeat "
        :notify #'maccalfw-event--hs-action
        :hs (maccalfw-event--checkbox-hs 'recurrence)
-       (plist-get event :recurrence))
+       recur)
 
       (apply 'widget-create
              'group
@@ -1240,23 +1376,34 @@ abort `\\[maccalfw-event-kill]'."))
              :value-to-external
              (lambda (widget _value)
                (unless (widget-get widget :hidden)
-                 (cl-loop
-                  with value = nil
-                  for child in (widget-get widget :children)
-                  for field-key = (widget-get child :field-key)
-                  when (and field-key
-                            (not (widget-get child :do-not-save))
-                            ;; If it's hidden, it shouldn't be part of the
-                            ;; value.
-                            (not (widget-get child :hidden)))
-                  do (setq value (widget-value child))
-                  and when value
-                  nconc
-                  (list
-                   (intern (concat ":" (string-trim-left
-                                        (symbol-name field-key)
-                                        "recurrence-")))
-                   value))))
+                 (string-join
+                  (cl-loop
+                   with value = nil
+                   for child in (widget-get widget :children)
+                   for field-key = (widget-get child :field-key)
+                   for up-field-key = (upcase (string-trim-left
+                                               (symbol-name field-key)
+                                               "recurrence-"))
+                   when (and field-key
+                             (not (widget-get child :do-not-save))
+                             ;; If it's hidden, it shouldn't be part of the
+                             ;; value.
+                             (not (widget-get child :hidden)))
+                   do (setq value (widget-value child))
+                   and when value
+                   collect
+                   (format "%s=%s"
+                           up-field-key
+                           (cond
+                            ((equal up-field-key "UNTIL")
+                             (format-time-string "%Y%m%dT%H%M%SZ" value nil))
+                            ((equal up-field-key "BYDAY")
+                             (string-join (cl-loop for v in value
+                                                   collect (symbol-name v))
+                                          ","))
+                            ((listp value) (string-join value ","))
+                            (t (format "%s" value)))))
+                  ";")))
              :indent 3
              ;; We have to set the group value here because otherwise the
              ;; checklists are not set correctly. This is because the group
@@ -1267,13 +1414,13 @@ abort `\\[maccalfw-event-kill]'."))
 
     (widget-insert "\n\n")
 
-    (when-let (stat (plist-get event :status))
-      (unless (equal stat "none")
+    (when-let (stat (maccalfw-event--get event 'STATUS))
+      (unless (eq stat 'none)
         (widget-insert
          (propertize "Status: " 'face 'maccalfw-event-field-names)
          (symbol-name stat) "\n\n")))
 
-    (when-let (org (plist-get event :organizer))
+    (when-let (org (maccalfw-event--get event 'ORGANIZER))
       (widget-insert
        (propertize "Organizer: " 'face 'maccalfw-event-field-names)
        org "\n\n"))
@@ -1287,7 +1434,7 @@ abort `\\[maccalfw-event-kill]'."))
      (concat
       (propertize "URL: " 'face 'maccalfw-event-field-names)
       "%v\n\n")
-     (or (plist-get event :url) ""))
+     (or (maccalfw-event--get event 'URL) ""))
 
     (widget-create
      'text
@@ -1295,7 +1442,7 @@ abort `\\[maccalfw-event-kill]'."))
      :format "%v" ; Text after the field!
      :keymap maccalfw-event-text-map
      :value-face 'maccalfw-event-notes-field
-     (or (plist-get event :notes) ""))
+     (or (maccalfw-event--get  event 'DESCRIPTION) ""))
 
     (widget-setup)
 
@@ -1318,7 +1465,7 @@ abort `\\[maccalfw-event-kill]'."))
     (widget-move 1) ;; Go to next widget (should be title)
     (widget-end-of-line) ;; Go to end of line
 
-    (when (plist-get event :read-only)
+    (when (maccalfw-event--get event 'X-MACCALFW-READ-ONLY)
       (maccalfw-event--make-inactive))))
 
 (defun maccalfw-event-data ()
@@ -1334,8 +1481,8 @@ editable and remove ID information so that the event will be
 treated as new when saved."
   (interactive)
   (let* ((data (maccalfw-event-data)))
-    (plist-put data :id nil)
-    (plist-put data :read-only nil)
+    (setf (alist-get 'UID data) nil
+          (alist-get 'X-READ-ONLY data) nil)
 
     ;; If calendar is read-only, we'll an error will be issued when trying to
     ;; save. So might as well not change it.

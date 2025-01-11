@@ -305,12 +305,6 @@ func emacs_process_error(_ env: PEmacsEnv,
 }
 
 
-extension NSNumber  : EmacsCastable {
-    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
-        return env.pointee.make_integer(env, self.intValue)
-    }
-}
-
 func emacs_intern(_ env: PEmacsEnv,
                   _ symbol: String) -> emacs_value? {
     return env.pointee.intern(env, symbol)
