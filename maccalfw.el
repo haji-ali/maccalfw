@@ -236,7 +236,6 @@ This command displays any CALENDARS obtained using
 (defun maccalfw-event-new-event (event-data)
   "Create an events-details buffer for a new event.
 EVENT-DATA contains the initial event information."
-  ;; TODO: Needs updating to ical form
   (interactive
    (list
     (if (and (derived-mode-p 'cfw:calendar-mode)

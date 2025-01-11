@@ -834,8 +834,7 @@ it."
           (event (widget-get title-wid :event-data)))
      (list (or (funcall ical-form-get-event-function
                         (ical-form--get event 'UID)
-                        ;; TODO pass start date
-                        )
+                        (ical-form--get event 'DTSTART))
                event)
            nil)))
   (when (and
