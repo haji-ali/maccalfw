@@ -238,11 +238,7 @@ This command displays any CALENDARS obtained using
 EVENT-DATA contains the initial event information."
   (interactive
    (list
-    (if (and (derived-mode-p 'cfw:calendar-mode)
-             ;; TODO: Check that the view is indeed a block
-             ;; (cfw:component-view (cfw:cp-get-component))
-             ;; should return a block view
-             (fboundp 'calfw-blocks-region-to-time))
+    (if (derived-mode-p 'cfw:calendar-mode)
         (if-let ((event (and current-prefix-arg
                              (get-text-property (point) 'cfw:event)))
                  (old-event-data (cfw:event-data event)))
@@ -255,23 +251,31 @@ EVENT-DATA contains the initial event information."
                                              URL
                                              DESCRIPTION))
                      collect item)
-          (cl-destructuring-bind (start end all-day)
-              (calfw-blocks-region-to-time)
-            (list (cons 'DTSTART (ical-form--format-ical-date start all-day))
-                  (cons 'DTEND (ical-form--format-ical-date
-                                (or end (time-add start 3600))
-                                all-day)))))
+          (when (and (fboundp 'calfw-blocks-region-to-time)
+                     (eq (cfw:component-view (cfw:cp-get-component))
+                         'block-week))
+            (cl-destructuring-bind (start end all-day)
+                (calfw-blocks-region-to-time)
+              (list (cons 'DTSTART (ical-form--format-ical-date start
+                                                                all-day))
+                    (cons 'DTEND (ical-form--format-ical-date
+                                  (or end (time-add start 3600))
+                                  all-day))))))
       (list (cons 'DTSTART (ical-form--format-ical-date (current-time)))
             (cons 'DTEND (ical-form--format-ical-date (time-add (current-time)
                                                                 3600)))))))
-  (ical-form-open event-data))
+  (ical-form-open event-data
+                  (maccalfw-get-calendars)
+                  (maccalfw-timezones)))
 
 (defun maccalfw-goto-event-details (event)
   "Open event details for the calfw EVENT."
   (interactive
    (list (or (get-text-property (point) 'cfw:event)
              (error "No event at location"))))
-  (ical-form-open (cfw:event-data event)))
+  (ical-form-open (cfw:event-data event)
+                  (maccalfw-get-calendars)
+                  (maccalfw-timezones)))
 
 
 (defun maccalfw-mouse-down-disable-dbl-click (event)
@@ -286,13 +290,16 @@ EVENT defaults to the event data."
         (setcar (nthcdr 2 event) 1))
     (mouse-drag-region event)))
 
-;; TODO: Temporary aliases that should be marked obsolete instead
+;; TODO: Temporary aliases/definition that should be marked obsolete instead
 (defalias 'maccalfw-event-new-event 'maccalfw-new-event)
 (defalias 'maccalfw-event-goto-details 'maccalfw-goto-event-details)
 (defalias 'maccalfw-event-delete-event 'maccalfw-delete-event)
 (defalias 'maccalfw-event-mouse-down 'maccalfw-mouse-down-disable-dbl-click)
 (defalias 'maccalfw-event-save-hook 'ical-form-save-hook)
-(defalias 'maccalfw-event-open 'ical-form-open)
+(defun maccalfw-event-open (event)
+  (ical-form-open event
+   (maccalfw-get-calendars)
+   (maccalfw-timezones)))
 
 (provide 'maccalfw)
 ;;; maccalfw.el ends here

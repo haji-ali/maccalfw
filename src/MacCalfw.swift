@@ -155,7 +155,7 @@ extension Date : iCalCastable {
     static func fromiCal_list(_ env: PEmacsEnv, _ v: [emacs_value?]) throws ->
       (date: Self, isAllDay: Bool, timeZone: String?) {
         guard v.count == 2, let dateString = String.fromEmacsVal(env, v[1]) else {
-            throw EmacsError.error("Invalid iCal input format: \(v)")
+            throw EmacsError.error("Invalid iCal input format: \(v.count)")
         }
 
         // TODO See https://developer.apple.com/documentation/foundation/iso8601dateformatter
@@ -164,7 +164,9 @@ extension Date : iCalCastable {
         let params = fromEmacsVal_list(env, v[0])
         if params.count >= 2 {
             // Check for "VALUE=DATE" (all-day event)
-            if let key = String.fromEmacsVal(env, params[0]),
+            let qSymbolName = emacs_intern(env, "symbol-name")
+            if let skey = emacs_funcall(env, qSymbolName, [params[0]]),
+               let key = String.fromEmacsVal(env, skey),
                let value = String.fromEmacsVal(env, params[1]) {
                 if key == "VALUE", value == "DATE" {
                     dateFormatter.dateFormat = "yyyyMMdd"
@@ -296,13 +298,13 @@ extension EKEvent : EmacsCastable {
            // TRANSP Doesn't support tentative nor notsupported.
            "TRANSP" : (self.availability == EKEventAvailability.free) ?
              "TRANSPARENT" : "OPAQUE",
-           "X-MACCALFW-AVAILABILITY" : self.availability.toiCal(),
-           "X-MACCALFW-CALID" : self.calendar.calendarIdentifier,
-           "X-MACCALFW-OCCURENCE-DATE" : self.occurrenceDate.toiCal(),
-           // These will not be included at all if they are nil.
-           "X-MACCALFW-DETACHED-P" : self.isDetached ? "yes" : nil,
-           "X-MACCALFW-ORGANIZER-CURRENT-USER" : (self.organizer?.isCurrentUser ?? true) ? nil : "yes",
-           "X-MACCALFW-READ-ONLY" : self.calendar.allowsContentModifications ? nil : "yes"]
+           "X-EMACS-AVAILABILITY" : self.availability.toiCal(),
+           "X-EMACS-CALID" : self.calendar.calendarIdentifier,
+           "X-EMACS-READ-ONLY" : self.calendar.allowsContentModifications ? nil : "yes",
+           // These are currently unused in maccalfw.el
+           "X-EMACS-OCCURENCE-DATE" : self.occurrenceDate.toiCal(),
+           "X-EMACS-DETACHED-P" : self.isDetached ? "yes" : nil,
+           "X-EMACS-ORGANIZER-CURRENT-USER" : (self.organizer?.isCurrentUser ?? true) ? nil : "yes"]
 
         var flatArgs : [EmacsCastable?] =
           event_plist.compactMap { (key, value) in
@@ -337,14 +339,14 @@ extension EKEvent : EmacsCastable {
                 self.notes = String.fromEmacsVal(env, element_raw)
 
             case "DTSTART":
-                let date = try Date.fromiCal_list(env, Array(item.value.dropFirst()))
+                let date = try Date.fromiCal_list(env, item.value)
                 self.startDate = date.date
                 self.isAllDay = date.isAllDay
                 self.timeZone = ((date.timeZone?.isEmpty ?? true) ? nil
                                    : TimeZone(identifier: date.timeZone!))
 
             case "DTEND":
-                let date = try Date.fromiCal_list(env, Array(item.value.dropFirst()))
+                let date = try Date.fromiCal_list(env, item.value)
                 self.endDate = date.date
                 // NOTE: We'll ignore timeZone from endDate for now
                 // while we figure out a solution for EKEvent
@@ -352,14 +354,15 @@ extension EKEvent : EmacsCastable {
                 // self.timeZone = ((date.timeZone?.isEmpty ?? true) ? nil
                 //                    : TimeZone(identifier: date.timeZone!))
 
-            case "X-MACCALFW-AVAILABILITY":
-                self.availability = try EKEventAvailability.fromEmacsVal(env, element_raw)
+            case "X-EMACS-AVAILABILITY":
+                self.availability = try EKEventAvailability.fromiCal(
+                  String.fromEmacsVal(env, element_raw) ?? "")
 
             case "URL":
                 let str = String.fromEmacsVal(env, element_raw)
                 self.url = ((str?.isEmpty ?? true) ? nil : URL(string: str!))
 
-            case "X-CALID":
+            case "X-EMACS-CALID":
                 let calendarId = String.fromEmacsVal(env, element_raw)
                 if let calendarId,
                    let calendar = eventStore.calendar(withIdentifier: calendarId) {
@@ -783,27 +786,24 @@ private func maccalfw_update_event(
 {
     if let env {
         do {
-            if let args, let arg0 = args[0] {
+            if let args, let arg0 = args[0], let arg1 = args[1] {
                 try AuthorizeCalendar(env)
-                let start = nargs > 1 ? Date.fromEmacsVal(env, args[1]) : nil
-                let future = nargs > 2 ? Bool.fromEmacsVal(env, args[2]) : false
+                let eventId = String.fromEmacsVal(env, arg0)
+
+                let start = nargs > 1 ? Date.fromEmacsVal(env, args[2]) : nil
+                let future = nargs > 2 ? Bool.fromEmacsVal(env, args[3]) : false
                 let event : EKEvent
-                let eventData = fromEmacsVal_list(env, arg0).map {
+
+                // Transform the data
+                let qSymbolName = emacs_intern(env, "symbol-name")
+                let eventData = fromEmacsVal_list(env, arg1).map {
                     let lst = fromEmacsVal_list(env, $0);
                     guard let first = lst.first,
-                          let sfirst = String.fromEmacsVal(env, first)
+                          let sName = emacs_funcall(env, qSymbolName, [first]),
+                          let sfirst = String.fromEmacsVal(env, sName)
                     else {return (key: "", value: lst) }
                     return (key : sfirst,
                             value: Array(lst.dropFirst()))}
-
-                var eventId : String? = nil
-                for item in eventData {
-                    if item.key == "UID" && item.value.count > 2
-                    {
-                        eventId = String.fromEmacsVal(env, item.value[1])
-                        break
-                    }
-                }
 
                 if let eventId  {
                     event = try getEKEvent(eventId, start)
@@ -956,28 +956,28 @@ calendar IDs.
 (fn CALENDAR-ID START-TIME END-TIME)
 """)
 
-        emacs_defun(env, "maccalfw-update-event", 1, 3, maccalfw_update_event,
+        emacs_defun(env, "maccalfw-update-event", 1, 4, maccalfw_update_event,
 """
-Update or create an EVENT.
+Update or create an event.
 
-EVENT is a plist specifying the event data. Only the key-value pairs in the plist
-are updated. If the plist contains a non-nil `:id`, the corresponding event is
-updated. Otherwise, the plist must contain a `:calendar-id` entry, and a new event
-is created in that calendar.
+ID is the event identifier if modifying an event, or nil when creating a new
+one. START specifies the old event's start date, which is used to distinguish
+events with the same ID (typically recurring events). Note that this should be
+the old start date of the event if you are updating it.
 
-START specifies the event's original start date, which is used to distinguish
-events with the same `:id` (typically recurring events). Note that this should
-be the old start date of the event if you are updating it. The EVENT plist may
-contain a new start date for the update.
+CHANGED-DATA is an alist specifying the event data in ical format. When
+updating an old event only the fields appearing in the alist are updated,
+leaving others unchanged. In particular, if ID is nil, the alist must contain
+a `X-EMACS-CALID` entry specifying the calendar identifier, so that the new
+event is created in that calendar. When updating an old event, if the alist
+contains an `X-EMACS-CALID`, the event is moved to the new calendar.
 
 If FUTURE is non-nil, all future occurrences in a recurring series are updated;
 otherwise, only the specific event matching the `START` date is updated.
 
-If the event includes a different `:calendar-id`, it is moved to the new calendar.
-
 Returns the data of the newly created or updated event.
 
-(fn EVENT &optional START FUTURE)
+(fn ID CHANGED-DATA &optional START FUTURE)
 """)
 
         emacs_defun(env, "maccalfw-get-event", 1, 2, maccalfw_get_event,

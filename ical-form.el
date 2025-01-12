@@ -25,9 +25,6 @@
 ;;; Commentary:
 
 ;;; Code:
-
-;; TODO: The X-MACCALFW-* properties need to be abstracted
-
 (require 'wid-edit)
 (require 'org)
 
@@ -41,14 +38,8 @@ Takes one argument which is the new event data."
   "If non-nil, modifying events with recurrences applies to future events.
 Special value \\='ask, prompts the user.")
 
-;; TODO: Is this actually needed?
-(defvar ical-form-get-event-function 'maccalfw-get-event)
-;; TODO: Should instead pass old and new data
+;; TODO: Should instead pass old and new data?
 (defvar ical-form-update-event-function 'maccalfw-update-event)
-;; TODO: These should be just passed as arguments
-(defvar ical-form-get-calendars-function 'maccalfw-get-calendars)
-(defvar ical-form-get-timezones-function 'maccalfw-timezones)
-
 
 (defface ical-form-notes-field
   '((t
@@ -105,8 +96,9 @@ Special value \\='ask, prompts the user.")
   (add-to-list 'kill-buffer-query-functions
                'ical-form-save-maybe))
 
-(defvar ical-form--timezones nil)
-(defvar ical-form--default-timezone nil)
+(defvar-local ical-form--timezones nil)
+(defvar-local ical-form--calendars nil)
+(defvar-local ical-form--default-timezone nil)
 
 
 ;; These need to be dynamically bound when using `org-pick-date'
@@ -203,7 +195,7 @@ from ALIST."
                    (DTSTAMP . ical-form--parse-ical-date)
                    (RRULE . ical-form--parse-ical-rrule)
                    (STATUS . ,parse-quote-string)
-                   (X-MACCALFW-AVAILABILITY . ,parse-quote-string)))
+                   (X-EMACS-AVAILABILITY . ,parse-quote-string)))
                 (lambda (x) (list (cadr x)))))
            (prop-val (funcall trans prop-val)))
       (if (eq subprop 't)
@@ -326,8 +318,7 @@ If DUPLICATE is non-nil, save the event as a new one."
          (old-id (unless duplicate
                    (ical-form--get old-data 'UID)))
          (new-data
-          `((UID nil ,old-id)
-            (X-MACCALFW-CALID nil ,(ical-form--value 'calendar-id widgets))
+          `((X-EMACS-CALID nil ,(ical-form--value 'calendar-id widgets))
             (SUMMARY nil ,(widget-value title-wid))
             (URL nil ,(ical-form--value 'url widgets))
             (RRULE nil
@@ -335,12 +326,12 @@ If DUPLICATE is non-nil, save the event as a new one."
                       (ical-form--value 'recurrence widgets)))
             (LOCATION nil ,(ical-form--value 'location widgets))
             (DESCRIPTION nil ,(ical-form--value 'notes widgets))
-            (X-MACCALFW-AVAILABILITY
+            (X-EMACS-AVAILABILITY
              nil
              ,(upcase (symbol-name
                        (ical-form--value 'availability widgets))))))
          (new-event (null old-id)))
-    (when (ical-form--get old-data 'X-MACCALFW-READ-ONLY)
+    (when (ical-form--get old-data 'X-EMACS-READ-ONLY)
       (user-error "Event is not editable.?"))
 
     (setq new-data
@@ -398,9 +389,9 @@ If DUPLICATE is non-nil, save the event as a new one."
                       :event-data
                       (funcall
                        ical-form-update-event-function
+                       old-id
                        new-data
-                       (ical-form--get new-data
-                                       'DTSTART)
+                       (ical-form--get old-data 'DTSTART)
                        future))
           (when (called-interactively-p 'interactive)
             (message "Event saved."))
@@ -537,11 +528,11 @@ case the end time/date is set."
                  end-time-wid
                  (ical-form--format-time new-time))))))))))
 
-(defun ical-form-open (event)
+(defun ical-form-open (event calendars timezeons)
   "Open a buffer to display the details of EVENT."
   (pop-to-buffer (generate-new-buffer "*calender event*"))
   (ical-form-mode)
-  (ical-form-rebuild-buffer event t))
+  (ical-form-rebuild-buffer event calendars timezeons t))
 
 (defun ical-form-read-only (&rest _junk)
   "Ignoring the arguments, signal an error."
@@ -816,7 +807,7 @@ checkbox."
                       (ical-form--show-hide-widget
                        wid (cl-some 'identity vis))))))
 
-(defun ical-form-rebuild-buffer (&optional event no-erase)
+(defun ical-form-rebuild-buffer (event calendars timezones &optional no-erase)
   "Rebuild buffer of maccalfw EVENT.
 If NO-ERASE is non-nil, do not reset the buffer before rebuilding
 it."
@@ -824,10 +815,9 @@ it."
    (let* ((widgets (ical-form--get-widgets))
           (title-wid (ical-form--find-widget 'title widgets))
           (event (widget-get title-wid :event-data)))
-     (list (or (funcall ical-form-get-event-function
-                        (ical-form--get event 'UID)
-                        (ical-form--get event 'DTSTART))
-               event)
+     (list event
+           ical-form--calendars
+           ical-form--timezones
            nil)))
   (when (and
          (derived-mode-p 'ical-form-mode)
@@ -841,7 +831,7 @@ it."
         (delete-all-overlays)))
 
     (ical-form-mode)
-    (ical-form--create-form event)
+    (ical-form--create-form event calendars timezones)
 
     (setq-local
      header-line-format
@@ -851,9 +841,12 @@ Save `\\[ical-form-save]', \
 abort `\\[ical-form-kill]'."))
     (set-buffer-modified-p nil)))
 
-(defun ical-form--create-form (event)
+(defun ical-form--create-form (event calendars timezones)
   "Create form in current buffer corresponding to EVENT."
-  (let* ((cal-id (ical-form--get event 'X-MACCALFW-CALID))
+
+  (setq ical-form--calendars calendars)
+
+  (let* ((cal-id (ical-form--get event 'X-EMACS-CALID))
          (dt-start (ical-form--get event 'DTSTART t))
          (timezone (or (alist-get 'TZID (cdr dt-start))
                        (car ical-form--default-timezone)))
@@ -869,9 +862,8 @@ abort `\\[ical-form-kill]'."))
                    :format "%v \n" ; Text after the field!
                    (or (ical-form--get event 'SUMMARY) ""))
 
-    (let* ((cals (funcall ical-form-get-calendars-function))
-           (options (cl-loop
-                     for x in cals
+    (let* ((options (cl-loop
+                     for x in calendars
                      when (or (plist-get x :editable)
                               (equal (plist-get x :id)
                                      cal-id))
@@ -889,12 +881,12 @@ abort `\\[ical-form-kill]'."))
                   (plist-get
                    (cl-find-if
                     (lambda (x) (plist-get x :default))
-                    cals)
+                    calendars)
                    :id)
                   (plist-get
                    (cl-find-if
                     (lambda (x) (plist-get x :editable))
-                    cals)
+                    calendars)
                    :id))
        options))
 
@@ -937,12 +929,11 @@ abort `\\[ical-form-kill]'."))
 
     (unless ical-form--timezones
       (setq
-       ical-form--timezones (funcall ical-form-get-timezones-function)
+       ical-form--timezones timezones
        ical-form--default-timezone
        (cl-find-if
         (lambda (x) (plist-get (cdr x) :default))
         ical-form--timezones)))
-
     (let* ((options (mapcar
                      (lambda (x)
                        `(item :tag ,(format "%s (%s)"
@@ -1231,7 +1222,7 @@ abort `\\[ical-form-kill]'."))
     (widget-move 1) ;; Go to next widget (should be title)
     (widget-end-of-line) ;; Go to end of line
 
-    (when (ical-form--get event 'X-MACCALFW-READ-ONLY)
+    (when (ical-form--get event 'X-EMACS-READ-ONLY)
       (ical-form--make-inactive))))
 
 (defun ical-form-data ()
@@ -1255,6 +1246,5 @@ treated as new when saved."
 
     ;; reactivate form
     (ical-form--make-inactive t)))
-
 
 (provide 'ical-form)
