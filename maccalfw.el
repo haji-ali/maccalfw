@@ -112,9 +112,9 @@ next day."
 (defun maccalfw--convert-event (event)
   "Convert an EVENT to a calfw event.
 The event is returned `maccalfw-fetch-events'."
-  (let* ((dt-start (ical-form--get event 'DTSTART t))
+  (let* ((dt-start (ical-form-event-get event 'DTSTART t))
          (start (decode-time (car dt-start)))
-         (end (decode-time (ical-form--get event 'DTEND)))
+         (end (decode-time (ical-form-event-get event 'DTEND)))
          (all-day-p (alist-get 'ALL-DAY-P (cdr dt-start)))
          (args
           (list
@@ -125,14 +125,14 @@ The event is returned `maccalfw-fetch-events'."
                           (maccalfw--decode-date end))
            :end-time    (unless all-day-p
                           (maccalfw--decode-time end))
-           :title       (ical-form--get event 'SUMMARY)
-           :location    (ical-form--get event 'LOCATION)
-           :description (ical-form--get event 'DESCRIPTION))))
+           :title       (ical-form-event-get event 'SUMMARY)
+           :location    (ical-form-event-get event 'LOCATION)
+           :description (ical-form-event-get event 'DESCRIPTION))))
     (when (and (alist-get 'status (cl-struct-slot-info 'cfw:event))
                (alist-get 'data (cl-struct-slot-info 'cfw:event)))
       (setq args
             (append args (list
-                          :status (ical-form--get event 'STATUS)
+                          :status (ical-form-event-get event 'STATUS)
                           :data        event))))
     (apply 'make-cfw:event args)))
 
@@ -224,9 +224,9 @@ This command displays any CALENDARS obtained using
   (or (prog1
           (let ((ev (cfw:event-data event)))
             (maccalfw-remove-event
-             (ical-form--get ev 'UID)
-             (ical-form--get ev 'DTSTART)
-             (if (ical-form--get ev 'RRULE)
+             (ical-form-event-get ev 'UID)
+             (ical-form-event-get ev 'DTSTART)
+             (if (ical-form-event-get ev 'RRULE)
                  (ical-form-modify-future-events-p)
                nil)))
         (message "Event deleted")

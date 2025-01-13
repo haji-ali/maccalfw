@@ -177,7 +177,7 @@ Returns a list (DATE IS-ALL-DAY TIME-ZONE)."
                               (string-split value "," t trim)))))))
       (string-split (cadr ical-list) ";" t trim)))))
 
-(defun ical-form--get (event prop &optional subprop)
+(defun ical-form-event-get (event prop &optional subprop)
   "Get property PROP from EVENT.
 
 If SUBPROP is nil, return the element value of PROP. If SUBPROP
@@ -316,7 +316,7 @@ If DUPLICATE is non-nil, save the event as a new one."
                  (ical-form--value 'start-date widgets))
                tz))
          (old-id (unless duplicate
-                   (ical-form--get old-data 'UID)))
+                   (ical-form-event-get old-data 'UID)))
          (new-data
           `((X-EMACS-CALID nil ,(ical-form--value 'calendar-id widgets))
             (SUMMARY nil ,(widget-value title-wid))
@@ -331,7 +331,7 @@ If DUPLICATE is non-nil, save the event as a new one."
              ,(upcase (symbol-name
                        (ical-form--value 'availability widgets))))))
          (new-event (null old-id)))
-    (when (ical-form--get old-data 'X-EMACS-READ-ONLY)
+    (when (ical-form-event-get old-data 'X-EMACS-READ-ONLY)
       (user-error "Event is not editable.?"))
 
     (setq new-data
@@ -379,11 +379,11 @@ If DUPLICATE is non-nil, save the event as a new one."
         ;; if old event has a recurrence, check with use if all future events
         ;; should be editied or just the current one
         (let ((future
-               (and (or (ical-form--get old-data 'RRULE)
-                        (ical-form--get new-data 'RRULE))
+               (and (or (ical-form-event-get old-data 'RRULE)
+                        (ical-form-event-get new-data 'RRULE))
                     ;; If changing recurrence rule, then we should modify all
                     ;; future events. Otherwise, we should ask the user
-                    (or (ical-form--get new-data 'RRULE)
+                    (or (ical-form-event-get new-data 'RRULE)
                         (ical-form-modify-future-events-p)))))
           (widget-put title-wid
                       :event-data
@@ -391,7 +391,7 @@ If DUPLICATE is non-nil, save the event as a new one."
                        ical-form-update-event-function
                        old-id
                        new-data
-                       (ical-form--get old-data 'DTSTART)
+                       (ical-form-event-get old-data 'DTSTART)
                        future))
           (when (called-interactively-p 'interactive)
             (message "Event saved."))
@@ -846,12 +846,12 @@ abort `\\[ical-form-kill]'."))
 
   (setq ical-form--calendars calendars)
 
-  (let* ((cal-id (ical-form--get event 'X-EMACS-CALID))
-         (dt-start (ical-form--get event 'DTSTART t))
+  (let* ((cal-id (ical-form-event-get event 'X-EMACS-CALID))
+         (dt-start (ical-form-event-get event 'DTSTART t))
          (timezone (or (alist-get 'TZID (cdr dt-start))
                        (car ical-form--default-timezone)))
          (all-day-p (alist-get 'ALL-DAY-P (cdr dt-start)))
-         (end (ical-form--get event 'DTEND)))
+         (end (ical-form-event-get event 'DTEND)))
     (widget-insert "\n\n")
 
     (widget-create 'editable-field
@@ -860,7 +860,7 @@ abort `\\[ical-form-kill]'."))
                    :keymap ical-form-field-map
                    :value-face 'ical-form-title-field
                    :format "%v \n" ; Text after the field!
-                   (or (ical-form--get event 'SUMMARY) ""))
+                   (or (ical-form-event-get event 'SUMMARY) ""))
 
     (let* ((options (cl-loop
                      for x in calendars
@@ -959,7 +959,7 @@ abort `\\[ical-form-kill]'."))
      :entry-format "%b %v "
      :format "%v\n\n"
      :value (or
-             (ical-form--get event 'X-AVAILABLITY) 'busy)
+             (ical-form-event-get event 'X-AVAILABLITY) 'busy)
      '(item :format "%[Tentative%] " :value tentative)
      '(item :format "%[Free%] " :value free)
      '(item :format "%[Busy%] " :value busy)
@@ -973,9 +973,9 @@ abort `\\[ical-form-kill]'."))
      (concat
       (propertize "Location: " 'face 'ical-form-field-names)
       "%v\n")
-     (or (ical-form--get event 'LOCATION) ""))
+     (or (ical-form-event-get event 'LOCATION) ""))
 
-    (let* ((recur (cdr (ical-form--get event 'RRULE t)))
+    (let* ((recur (cdr (ical-form-event-get event 'RRULE t)))
            (group-items
             (list
              `(editable-field
@@ -1171,13 +1171,13 @@ abort `\\[ical-form-kill]'."))
 
     (widget-insert "\n\n")
 
-    (when-let (stat (ical-form--get event 'STATUS))
+    (when-let (stat (ical-form-event-get event 'STATUS))
       (unless (eq stat 'none)
         (widget-insert
          (propertize "Status: " 'face 'ical-form-field-names)
          (symbol-name stat) "\n\n")))
 
-    (when-let (org (ical-form--get event 'ORGANIZER))
+    (when-let (org (ical-form-event-get event 'ORGANIZER))
       (widget-insert
        (propertize "Organizer: " 'face 'ical-form-field-names)
        org "\n\n"))
@@ -1191,7 +1191,7 @@ abort `\\[ical-form-kill]'."))
      (concat
       (propertize "URL: " 'face 'ical-form-field-names)
       "%v\n\n")
-     (or (ical-form--get event 'URL) ""))
+     (or (ical-form-event-get event 'URL) ""))
 
     (widget-create
      'text
@@ -1199,7 +1199,7 @@ abort `\\[ical-form-kill]'."))
      :format "%v" ; Text after the field!
      :keymap ical-form-text-map
      :value-face 'ical-form-notes-field
-     (or (ical-form--get  event 'DESCRIPTION) ""))
+     (or (ical-form-event-get  event 'DESCRIPTION) ""))
 
     (widget-setup)
 
@@ -1222,7 +1222,7 @@ abort `\\[ical-form-kill]'."))
     (widget-move 1) ;; Go to next widget (should be title)
     (widget-end-of-line) ;; Go to end of line
 
-    (when (ical-form--get event 'X-EMACS-READ-ONLY)
+    (when (ical-form-event-get event 'X-EMACS-READ-ONLY)
       (ical-form--make-inactive))))
 
 (defun ical-form-data ()
