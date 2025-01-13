@@ -4,7 +4,7 @@
 
 ;; Author: Al Haji-Ali <abdo.haji.ali at gmail.com>
 ;; Created: 2023
-;; Version: 0.1
+;; Version: 0.2
 ;; Package-Requires: ((emacs "28.1"))
 ;; Homepage: https://github.com/haji-ali/maccalfw
 ;; Keywords: calendar
@@ -38,8 +38,16 @@ Takes one argument which is the new event data."
   "If non-nil, modifying events with recurrences applies to future events.
 Special value \\='ask, prompts the user.")
 
-;; TODO: Should instead pass old and new data?
-(defvar ical-form-update-event-function 'maccalfw-update-event)
+(defvar ical-form-update-event-function (and (fboundp 'maccalfw-update-event)
+                                             'maccalfw-update-event)
+  "Function to call to update/create event.
+
+Expected arguments are (ID CHANGED-DATA START FUTURE)
+where ID and START are the event UID and its start date, which
+should be used to identify the event (even when recurring).
+Future is non-nil when all events should be modified, otherwise
+only the current one. CHANGED-DATA are the field that were
+modified, relative to the current values.")
 
 (defface ical-form-notes-field
   '((t
@@ -818,7 +826,7 @@ checkbox."
                        wid (cl-some 'identity vis))))))
 
 (defun ical-form-rebuild-buffer (event &optional no-erase)
-  "Rebuild buffer of maccalfw EVENT.
+  "Rebuild ical-form buffer from EVENT.
 If NO-ERASE is non-nil, do not reset the buffer before rebuilding
 it."
   (interactive

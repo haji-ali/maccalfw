@@ -4,7 +4,7 @@
 
 ;; Author: Al Haji-Ali <abdo.haji.ali at gmail.com>
 ;; Created: 2023
-;; Version: 0.1
+;; Version: 0.2
 ;; Package-Requires: ((emacs "28.1") (calfw "1.7"))
 ;; Homepage: https://github.com/haji-ali/maccalfw
 ;; Keywords: calendar
@@ -214,7 +214,7 @@ This command displays any CALENDARS obtained using
 
 ;; TODO: maccalfw-delete-event should be here, but at the moment
 ;; it uses ical-form to check if we should modify future events
-;; this should be abstract somehow.
+;; this should be abstracted somehow.
 
 (defun maccalfw-delete-event (event)
   "Delete calfw EVENT."
@@ -290,16 +290,14 @@ EVENT defaults to the event data."
         (setcar (nthcdr 2 event) 1))
     (mouse-drag-region event)))
 
-;; TODO: Temporary aliases/definition that should be marked obsolete instead
-(defalias 'maccalfw-event-new-event 'maccalfw-new-event)
-(defalias 'maccalfw-event-goto-details 'maccalfw-goto-event-details)
-(defalias 'maccalfw-event-delete-event 'maccalfw-delete-event)
-(defalias 'maccalfw-event-mouse-down 'maccalfw-mouse-down-disable-dbl-click)
-(defalias 'maccalfw-event-save-hook 'ical-form-save-hook)
-(defun maccalfw-event-open (event)
-  (ical-form-open event
-   (maccalfw-get-calendars)
-   (maccalfw-timezones)))
+(make-obsolete 'maccalfw-event-new-event'maccalfw-new-event "0.2")
+(make-obsolete 'maccalfw-event-goto-details
+               'maccalfw-goto-event-details "0.2")
+(make-obsolete 'maccalfw-event-delete-event 'maccalfw-delete-event  "0.2")
+(make-obsolete 'maccalfw-event-mouse-down
+               'maccalfw-mouse-down-disable-dbl-click "0.2")
+(make-obsolete 'maccalfw-event-open 'ical-form-open "0.2")
+(make-obsolete-variable 'maccalfw-event-save-hook 'ical-form-save-hook  "0.2")
 
 (provide 'maccalfw)
 ;;; maccalfw.el ends here
