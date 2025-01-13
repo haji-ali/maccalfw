@@ -45,7 +45,7 @@ extension Int : iCalCastable {
 extension Array : iCalCastable where Element == iCalCastable?  {
     func toiCal() -> String {
         let elem = self.compactMap{$0?.toiCal() ?? nil}
-        return elem.joined(separator: ";")
+        return elem.joined(separator: ",")
     }
     static func fromiCal(_ v : String ) throws -> Self
     {

@@ -731,7 +731,8 @@ TIMEZONE."
 (defun ical-form--parse-date-field (_widget value)
   "Parse VALUE of WIDGET as a date."
   (unless (string-empty-p value)
-    (parse-time-string value)))
+    (encode-time (parse-time-string (format "%s 00:00:00"
+                                            value)))))
 
 (defun ical-form--timezone-widget-notify (widget &rest _)
   "Action for timezone action.
@@ -1076,7 +1077,7 @@ abort `\\[ical-form-kill]'."))
                :do-not-save t
                :entry-format "%b %v"
                :format "%v"
-               :hs ((on . recurrence-end-date)
+               :hs ((on . recurrence-until)
                     (after . recurrence-count))
                :notify ical-form--hs-action
                :value ,(or (and (alist-get 'UNTIL recur) 'on)
@@ -1085,7 +1086,7 @@ abort `\\[ical-form-kill]'."))
                (item :format "%[After%] " :value after))
 
              `(editable-field
-               :field-key recurrence-end-date
+               :field-key recurrence-until
                :value-to-external ical-form--parse-date-field
                :keymap ical-form-field-map
                ;; additional space is needed, otherwise :from and :to of the widget
@@ -1153,7 +1154,7 @@ abort `\\[ical-form-kill]'."))
                            up-field-key
                            (cond
                             ((equal up-field-key "UNTIL")
-                             (format-time-string "%Y%m%dT%H%M%SZ" value nil))
+                             (format-time-string "%Y%m%dT235959" value nil))
                             ((equal up-field-key "BYDAY")
                              (string-join (cl-loop for v in value
                                                    collect (symbol-name v))
