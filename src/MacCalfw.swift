@@ -3,9 +3,14 @@ import CEmacsModule
 import EventKit
 
 ////////////////////////////////////////////////////
-
 // TODO: Avoid having global variables? Maybe we can use function data or
-// `make_user_ptr`instead
+// `make_user_ptr`instead.
+// The question becomes: when should I call free_global_ref?
+//
+// One potential fix is to use an Emacs global variable
+// (see `symbol-value` to get the value of the
+// variable and `set` to set). So that it gets freed by the GC.
+
 let eventStore = EKEventStore()
 var Qt : emacs_value?
 var Qnil : emacs_value?
@@ -36,7 +41,7 @@ extension Int : iCalCastable {
 
     static func fromiCal(_ val : String) throws -> Self {
         guard let ret = Self(val) else {
-            throw EmacsError.error("Unable to parse integer") // TODO: a better class?
+            throw EmacsError.error("Unable to parse integer")
         }
         return ret
     }
@@ -49,8 +54,7 @@ extension Array : iCalCastable where Element == iCalCastable?  {
     }
     static func fromiCal(_ v : String ) throws -> Self
     {
-        // TODO
-        return Self()
+        throw EmacsError.error("Unimplemented function")
     }
 }
 
@@ -110,7 +114,6 @@ extension EKEventStatus : EmacsEnumCastable, iCalEnumCastable  {
 
 extension Date : iCalCastable {
     func toiCal() -> String {
-        // TODO See https://developer.apple.com/documentation/foundation/iso8601dateformatter
         let dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
         dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
@@ -118,7 +121,6 @@ extension Date : iCalCastable {
     }
 
     static func fromiCal(_ dateString: String) throws -> Self {
-        // TODO See https://developer.apple.com/documentation/foundation/iso8601dateformatter
         let dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
         dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
@@ -133,7 +135,6 @@ extension Date : iCalCastable {
     func toiCal_list(_ all_day : Bool = false,
                 _ timeZoneId : String? = nil) -> [EmacsCastable?] {
         var params : [EmacsCastable?]? = nil
-        // TODO See https://developer.apple.com/documentation/foundation/iso8601dateformatter
         let dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
         if all_day {
@@ -158,7 +159,6 @@ extension Date : iCalCastable {
             throw EmacsError.error("Invalid iCal input format: \(v.count)")
         }
 
-        // TODO See https://developer.apple.com/documentation/foundation/iso8601dateformatter
         let dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
         let params = fromEmacsVal_list(env, v[0])
@@ -939,8 +939,6 @@ public func emacs_module_init(_ runtime: UnsafeMutablePointer<emacs_runtime>) ->
         }
         Qnil = env.pointee.make_global_ref(env, emacs_intern(env, "nil"))
         Qt = env.pointee.make_global_ref(env, emacs_intern(env, "t"))
-
-        // TODO: When should I call free_global_ref?
 
         emacs_defun(env, "maccalfw-get-calendars", 0, 0, maccalfw_get_calendars,
 """
