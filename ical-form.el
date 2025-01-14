@@ -529,7 +529,9 @@ case the end time/date is set."
                  (ical-form--format-time new-time))))))))))
 
 (defun ical-form-open (event calendars timezones)
-  "Open a buffer to display the details of EVENT."
+  "Open a buffer to display the details of EVENT.
+CALENDARS and TIMEZONES should be a list of calendars, and
+timezones to use in the form."
   (pop-to-buffer (generate-new-buffer "*calender event*"))
   (ical-form-mode)
   (setq
@@ -1264,3 +1266,4 @@ treated as new when saved."
     (ical-form--make-inactive t)))
 
 (provide 'ical-form)
+;;; ical-form.el ends here
