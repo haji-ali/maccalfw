@@ -514,7 +514,8 @@ extension EKRecurrenceRule : iCalCastable {
     func toiCal() -> String {
         let rrule : [String : iCalCastable?] =
           ["UNTIL" : self.recurrenceEnd?.endDate,
-           "COUNT" : self.recurrenceEnd?.occurrenceCount,
+           "COUNT" :
+             (self.recurrenceEnd?.occurrenceCount).flatMap { $0 > 0 ? $0 : nil },
            "INTERVAL": self.interval,
            "FREQ": self.frequency,
            "WKST": self.firstDayOfTheWeek,

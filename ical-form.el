@@ -528,11 +528,18 @@ case the end time/date is set."
                  end-time-wid
                  (ical-form--format-time new-time))))))))))
 
-(defun ical-form-open (event calendars timezeons)
+(defun ical-form-open (event calendars timezones)
   "Open a buffer to display the details of EVENT."
   (pop-to-buffer (generate-new-buffer "*calender event*"))
   (ical-form-mode)
-  (ical-form-rebuild-buffer event calendars timezeons t))
+  (setq
+   ical-form--calendars calendars
+   ical-form--timezones timezones
+   ical-form--default-timezone
+   (cl-find-if
+    (lambda (x) (plist-get (cdr x) :default))
+    ical-form--timezones))
+  (ical-form-rebuild-buffer event t))
 
 (defun ical-form-read-only (&rest _junk)
   "Ignoring the arguments, signal an error."
@@ -808,7 +815,7 @@ checkbox."
                       (ical-form--show-hide-widget
                        wid (cl-some 'identity vis))))))
 
-(defun ical-form-rebuild-buffer (event calendars timezones &optional no-erase)
+(defun ical-form-rebuild-buffer (event &optional no-erase)
   "Rebuild buffer of maccalfw EVENT.
 If NO-ERASE is non-nil, do not reset the buffer before rebuilding
 it."
@@ -816,10 +823,10 @@ it."
    (let* ((widgets (ical-form--get-widgets))
           (title-wid (ical-form--find-widget 'title widgets))
           (event (widget-get title-wid :event-data)))
-     (list event
-           ical-form--calendars
-           ical-form--timezones
-           nil)))
+     (list event nil)))
+  (let ((timezones ical-form--timezones)
+        (calendars ical-form--calendars)
+        (default-timezone ical-form--default-timezone))
   (when (and
          (derived-mode-p 'ical-form-mode)
          (or (not (buffer-modified-p))
@@ -832,7 +839,13 @@ it."
         (delete-all-overlays)))
 
     (ical-form-mode)
-    (ical-form--create-form event calendars timezones)
+
+      (setq
+       ical-form--calendars calendars
+       ical-form--timezones timezones
+       ical-form--default-timezone default-timezone)
+
+      (ical-form--create-form event)
 
     (setq-local
      header-line-format
@@ -840,17 +853,16 @@ it."
       "\\<ical-form-mode-map>Event details. \
 Save `\\[ical-form-save]', \
 abort `\\[ical-form-kill]'."))
-    (set-buffer-modified-p nil)))
+      (set-buffer-modified-p nil))))
 
-(defun ical-form--create-form (event calendars timezones)
+(defun ical-form--create-form (event)
   "Create form in current buffer corresponding to EVENT."
-
-  (setq ical-form--calendars calendars)
-
   (let* ((cal-id (ical-form-event-get event 'X-EMACS-CALID))
          (dt-start (ical-form-event-get event 'DTSTART t))
+         (timezones ical-form--timezones)
+         (calendars ical-form--calendars)
          (timezone (or (alist-get 'TZID (cdr dt-start))
-                       (car ical-form--default-timezone)))
+                       (car-safe ical-form--default-timezone)))
          (all-day-p (alist-get 'ALL-DAY-P (cdr dt-start)))
          (end (ical-form-event-get event 'DTEND)))
     (widget-insert "\n\n")
@@ -927,14 +939,6 @@ abort `\\[ical-form-kill]'."))
                         'end-date
                         '(start-time end-time timezone))
                    all-day-p)
-
-    (unless ical-form--timezones
-      (setq
-       ical-form--timezones timezones
-       ical-form--default-timezone
-       (cl-find-if
-        (lambda (x) (plist-get (cdr x) :default))
-        ical-form--timezones)))
     (let* ((options (mapcar
                      (lambda (x)
                        `(item :tag ,(format "%s (%s)"
@@ -942,7 +946,7 @@ abort `\\[ical-form-kill]'."))
                                             (plist-get (cdr x) :abbrev))
                               :value ,(car x)
                               :details x))
-                     ical-form--timezones)))
+                     timezones)))
       (apply
        'widget-create
        'menu-choice
@@ -1154,10 +1158,21 @@ abort `\\[ical-form-kill]'."))
                            up-field-key
                            (cond
                             ((equal up-field-key "UNTIL")
-                             (format-time-string "%Y%m%dT235959" value nil))
+                             (concat (format-time-string "%Y%m%d" value nil)
+                                     ;; Get the time from the current entry
+                                     (if-let ((prev-until (ical-form-event-get
+                                                           (ical-form-data)
+                                                           'RRULE
+                                                           'UNTIL)))
+                                         (format-time-string "T%H%M%SZ"
+                                                             prev-until t)
+                                       "T235959Z")))
+                            ((equal up-field-key "FREQ")
+                             (upcase (symbol-name value)))
                             ((equal up-field-key "BYDAY")
                              (string-join (cl-loop for v in value
-                                                   collect (symbol-name v))
+                                                   collect (upcase
+                                                            (symbol-name v)))
                                           ","))
                             ((listp value) (string-join value ","))
                             (t (format "%s" value)))))
