@@ -196,88 +196,7 @@ extension Date : iCalCastable {
     }
 }
 
-extension EKEvent : EmacsCastable {
-    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
-        let event_plist : [String : EmacsCastable?] =
-          [":id" : self.eventIdentifier,
-           ":calendar-id" : self.calendar.calendarIdentifier,
-           ":title" :self.title,
-           ":location" : self.location,
-           ":notes" : self.hasNotes ? self.notes : nil,
-           ":start" : self.startDate,
-           ":end" : self.endDate,
-           ":occurrence-date" : self.occurrenceDate,
-           ":detached-p" : self.isDetached ? Qt : nil,
-           ":all-day-p" : self.isAllDay ? Qt : nil,
-           ":created-date" : self.creationDate,
-           ":last-modified" : self.lastModifiedDate,
-           ":timezone" : self.timeZone?.identifier,
-           ":status" : self.status,
-           ":availability" : self.availability,
-           ":organizer" : self.organizer?.name,
-           ":recurrence" : self.hasRecurrenceRules ?
-             (self.recurrenceRules as [EmacsCastable?]?) : nil,
-           ":organizer-current-user" : (self.organizer?.isCurrentUser ?? true) ? nil : Qt,
-           ":read-only" : self.calendar.allowsContentModifications ? nil : Qt,
-           ":url" : self.url?.absoluteString]
-
-        return toEmacsVal_plist(env, event_plist)
-    }
-
-    func updateFromPList(_ env: PEmacsEnv,
-                         _ eventData: [String : emacs_value]) throws {
-        if let tmp = eventData["calendar-id"] {
-            let calendar_id = String.fromEmacsVal(env, tmp)
-            if let calendar_id,
-               let calendar = eventStore.calendar(withIdentifier: calendar_id) {
-                self.calendar = calendar
-            }
-            else {
-                throw EmacsError.error("Cannot retrieve calendar")
-            }
-        }
-
-        if let tmp = eventData["title"] {
-            self.title = String.fromEmacsVal(env, tmp)
-        }
-        if let tmp = eventData["recurrence"] {
-            self.recurrenceRules = try fromEmacsVal_list(env, tmp).map{
-                try EKRecurrenceRule.fromEmacsVal(env, $0)}
-        }
-        if let tmp = eventData["start"] {
-            self.startDate = Date.fromEmacsVal(env, tmp)
-        }
-        if let tmp = eventData["end"] {
-            self.endDate = Date.fromEmacsVal(env, tmp)
-        }
-        if let tmp = eventData["location"] {
-            let str = String.fromEmacsVal(env, tmp)
-            self.location = (str?.isEmpty ?? true) ? nil : str
-        }
-        if let tmp = eventData["notes"] {
-            self.notes = String.fromEmacsVal(env, tmp)
-        }
-        if let tmp = eventData["url"] {
-            let str = String.fromEmacsVal(env, tmp)
-            self.url = ((str?.isEmpty ?? true) ? nil
-                          : URL(string: str!))
-        }
-        if let tmp = eventData["timezone"] {
-            let str = String.fromEmacsVal(env, tmp)
-            self.timeZone = ((str?.isEmpty ?? true) ? nil
-                               : TimeZone(identifier: str!))
-        }
-
-        if let tmp = eventData["all-day-p"] {
-            self.isAllDay = is_not_nil(env, tmp)
-        }
-        if let tmp = eventData["availability"] {
-            self.availability = try EKEventAvailability.fromEmacsVal(env, tmp)
-        }
-        // Read-only: occurrenceDate, organizer, last_modified, created_date
-        // detached-p, status
-    }
-
+extension EKEvent {
     func toiCal() -> EmacsCastable {
         let event_plist : [String : EmacsCastable?] =
           ["UID" : self.eventIdentifier,
@@ -387,27 +306,6 @@ extension EKEvent : EmacsCastable {
     }
 }
 
-extension EKRecurrenceDayOfWeek : EmacsCastable {
-    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
-        let plist : [String : EmacsCastable?] =
-          [":week-day" : self.dayOfTheWeek,
-           ":week-number" : self.weekNumber]
-
-        return toEmacsVal_plist(env, plist)
-    }
-
-    static func fromEmacsVal(_ env: PEmacsEnv,
-                             _ val: emacs_value?) throws -> Self {
-      let data = try fromEmacsVal_plist(env, val)
-      let dayOfTheWeek  = try EKWeekday.fromEmacsVal(env, data["week-day"])
-      if let tmp = data["week-number"] {
-          let weekNumber : Int = Int.fromEmacsVal(env, tmp) ?? 0
-          return Self(dayOfTheWeek: dayOfTheWeek, weekNumber: weekNumber)
-      }
-      return Self.init(dayOfTheWeek)
-    }
-}
-
 extension EKRecurrenceDayOfWeek : iCalCastable {
     func toiCal() -> String {
         let str = self.dayOfTheWeek.toiCal()
@@ -430,83 +328,6 @@ extension EKRecurrenceDayOfWeek : iCalCastable {
         let weekNumber = match.output.1.flatMap { Int($0) } ?? 0
         // Return the constructed EKRecurrenceDayOfWeek
         return Self(dayOfWeek, weekNumber: weekNumber)
-    }
-}
-
-extension EKRecurrenceRule : EmacsCastable {
-    func toEmacsVal(_ env: PEmacsEnv) -> emacs_value? {
-        let plist : [String : EmacsCastable?] =
-          [":end-date" : self.recurrenceEnd?.endDate,
-           ":occurrence-count" : self.recurrenceEnd?.occurrenceCount,
-           // Seems to just be "gregorian!"
-           // ":calendar-id": self.calendarIdentifier,
-           ":interval": self.interval,
-           ":frequency": self.frequency,
-           ":week-first-day": self.firstDayOfTheWeek,
-           ":week-days": self.daysOfTheWeek as [EmacsCastable?]?,
-           ":month-days": self.daysOfTheMonth?.compactMap{$0.intValue},
-           ":year-days": self.daysOfTheYear?.compactMap{$0.intValue},
-           ":year-weeks": self.weeksOfTheYear?.compactMap{$0.intValue},
-           ":year-months": self.monthsOfTheYear?.compactMap{$0.intValue},
-           ":set-positions": self.setPositions?.compactMap{$0.intValue}]
-
-        return toEmacsVal_plist(env, plist)
-    }
-
-    static func fromEmacsVal(_ env: PEmacsEnv,
-                             _ val: emacs_value?) throws -> Self {
-        let data = try fromEmacsVal_plist(env, val)
-        let freq = try EKRecurrenceFrequency.fromEmacsVal(env, data["frequency"])
-        // Default to an interval of 1
-        let interval = Int.fromEmacsVal(env, data["interval"]) ?? 1
-        var daysOfTheWeek: [EKRecurrenceDayOfWeek]? = nil
-        var end: EKRecurrenceEnd? = nil
-        var daysOfTheMonth, daysOfTheYear,
-              weeksOfTheYear, monthsOfTheYear, setPositions : [NSNumber]?
-
-        // Simple rule
-        if let tmp = data["end-date"],
-           let val = Date.fromEmacsVal(env, tmp)  {
-            end = EKRecurrenceEnd(end: val)
-        }
-        if let tmp = data["occurrence-count"],
-           let val = Int.fromEmacsVal(env, tmp) {
-            end = EKRecurrenceEnd(occurrenceCount: val)
-        }
-        // Complex rule
-        if let tmp = data["week-days"] {
-            daysOfTheWeek = try fromEmacsVal_list(env, tmp).map{
-                try EKRecurrenceDayOfWeek.fromEmacsVal(env, $0)}
-        }
-        if let tmp = data["month-days"] {
-            daysOfTheMonth = fromEmacsVal_list(env, tmp).compactMap{
-                Int.fromEmacsVal(env, $0).map(NSNumber.init)}
-        }
-        if let tmp = data["year-days"] {
-            daysOfTheYear = fromEmacsVal_list(env, tmp).compactMap{
-                Int.fromEmacsVal(env, $0).map(NSNumber.init)}
-        }
-        if let tmp = data["year-weeks"] {
-            weeksOfTheYear = fromEmacsVal_list(env, tmp).compactMap{
-                Int.fromEmacsVal(env, $0).map(NSNumber.init)}
-        }
-        if let tmp = data["year-months"] {
-            monthsOfTheYear = fromEmacsVal_list(env, tmp).compactMap{
-                Int.fromEmacsVal(env, $0).map(NSNumber.init)}
-        }
-        if let tmp = data["set-positions"] {
-            setPositions =  fromEmacsVal_list(env, tmp).compactMap{
-                Int.fromEmacsVal(env, $0).map(NSNumber.init)}
-        }
-        return Self(recurrenceWith: freq,
-                    interval: interval,
-                    daysOfTheWeek: daysOfTheWeek,
-                    daysOfTheMonth: daysOfTheMonth,
-                    monthsOfTheYear: monthsOfTheYear,
-                    weeksOfTheYear: weeksOfTheYear,
-                    daysOfTheYear: daysOfTheYear,
-                    setPositions: setPositions,
-                    end: end)
     }
 }
 
@@ -820,7 +641,7 @@ private func maccalfw_update_event(
                     try eventStore.save(event,
                                         span: future ? .futureEvents : .thisEvent,
                                         commit: true)
-                    return event.toEmacsVal(env)
+                    return event.toiCal().toEmacsVal(env)
                 } catch {
                     throw EmacsError.error("Failed to save event with error: \(error.localizedDescription)")
                 }
