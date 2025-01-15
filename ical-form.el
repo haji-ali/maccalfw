@@ -155,6 +155,7 @@ specifies the timezone."
 (defun ical-form--parse-ical-rrule (ical-list)
   "Parse an iCal list format ICAL-LIST into date components.
 Returns a list (DATE IS-ALL-DAY TIME-ZONE)."
+  (when ical-list
   (let ((trim "[[:space:]]*"))
     (append
      (list 'rrule)
@@ -183,7 +184,8 @@ Returns a list (DATE IS-ALL-DAY TIME-ZONE)."
                   (otherwise (mapcar
                               'string-to-number
                               (string-split value "," t trim)))))))
-      (string-split (cadr ical-list) ";" t trim)))))
+        (and (cadr ical-list)
+             (string-split (cadr ical-list) ";" t trim)))))))
 
 (defun ical-form-event-get (event prop &optional subprop)
   "Get property PROP from EVENT.
@@ -370,10 +372,8 @@ If DUPLICATE is non-nil, save the event as a new one."
                 :test-plist `(RRULE
                               (lambda (x y)
                                 (not (ical-form--diff-alist
-                                      (and x
-                                           (cdr (ical-form--parse-ical-rrule x)))
-                                      (and y
-                                           (cdr (ical-form--parse-ical-rrule y)))
+                                      (cdr (ical-form--parse-ical-rrule x))
+                                      (cdr (ical-form--parse-ical-rrule y))
                                       :test 'seq-set-equal-p
                                       :test-plist
                                       '(;
@@ -926,7 +926,7 @@ abort `\\[ical-form-kill]'."))
                    :keymap ical-form-field-map
                    :format "  --    %v   "
                    :size 10
-                   (format-time-string "%F" (car end)))
+                   (format-time-string "%F" end))
     (widget-create 'editable-field
                    :field-key 'start-time
                    :keymap ical-form-field-map
