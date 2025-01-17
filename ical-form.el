@@ -31,28 +31,17 @@
 (defcustom ical-form-event-updated-hook nil
   "Hook called when an event is updated successfully.
 Takes two arguments, the first is the old event data and the
-second is the new event data, or \\='remove if the event was
-removed."
+second is the new event data."
   :type 'hook
   :group 'ical-form)
 
-(defvar ical-form-modify-future-events-p 'ask
-  "If non-nil, modifying events with recurrences applies to future events.
-Special value \\='ask, prompts the user.")
-
-(defvar ical-form-update-event-function (and (fboundp 'maccalfw-update-event)
-                                             'maccalfw-update-event)
+(defvar ical-form-update-event-function (and (fboundp 'maccalfw-modify-event)
+                                             'maccalfw-modify-event)
   "Function to call to update/create event.
 
-Expected arguments are (ID CHANGED-DATA START FUTURE) where ID
-and START are the event UID and its start date, which should be
-used to identify the event (even when recurring). Future is
-non-nil when all events should be modified, otherwise only the
-current one. CHANGED-DATA contain the fields that were modified,
-relative to the current values.
-
-Special value is of CHANGED-DATA is 'remove, in which case the
-event should be removed rather than updated.")
+Expected arguments are (OLD-DATA CHANGED-DATA) where OLD-DATA is
+the event OLD-DATA, if any. CHANGED-DATA contain the fields that
+were modified, relative to the old values.")
 
 (defface ical-form-notes-field
   '((t
@@ -389,29 +378,20 @@ If DUPLICATE is non-nil, save the event as a new one."
                                         INTERVAL eq
                                         FREQ equal))))))))))
     (if new-data
-        ;; if old event has a recurrence, check with use if all future events
-        ;; should be editied or just the current one
-        (let ((future
-               (and (or (ical-form-event-get old-data 'RRULE)
-                        (ical-form-event-get new-data 'RRULE))
-                    ;; If changing recurrence rule, then we should modify all
-                    ;; future events. Otherwise, we should ask the user
-                    (or (ical-form-event-get new-data 'RRULE)
-                        (ical-form-modify-future-events-p)))))
           (widget-put title-wid
                       :event-data
                       (funcall
                        ical-form-update-event-function
                        old-id
+                     old-data
                        new-data
-                       (ical-form-event-get old-data 'DTSTART)
-                       future))
+                     (ical-form-event-get old-data 'DTSTART)))
           (when (called-interactively-p 'interactive)
             (message "Event saved."))
           (run-hook-with-args
            'ical-form-event-updated-hook
            old-data
-           (widget-get title-wid :event-data)))
+       (widget-get title-wid :event-data))
       (when (called-interactively-p 'interactive)
         (message "(No changes to event to be saved)")))
     (set-buffer-modified-p nil)))
@@ -561,24 +541,6 @@ timezones to use in the form."
   "Ignoring the arguments, signal an error."
   (unless inhibit-read-only
     (error "The event is read-only")))
-
-(defun ical-form-modify-future-events-p (&optional prompt)
-  "Return non-nil if modification should affect all future events.
-Check the value of the variable
-`ical-form-modify-future-events-p', and potentially prompt
-the user, displaying the message PROMPT."
-  (if (eq ical-form-modify-future-events-p 'ask)
-      (let ((response
-             (cadr
-              (read-multiple-choice
-               (format (or prompt "Which events to modify?")
-                       (buffer-name))
-               '((?f "future" "Modification applies to all future events.")
-                 (?c "current" "Modification applies only to current event."))
-               nil nil (and (not use-short-answers)
-                            (not (use-dialog-box-p)))))))
-        (equal response "future"))
-    ical-form-modify-future-events-p))
 
 (defun ical-form--widget-overlay (widget key delete &rest props)
   "Create an overlay around WIDGET, setting its PROPS.
@@ -1287,24 +1249,6 @@ If ALL-DAY is non-nil, the event should be for the whole day."
               (ical-form--format-ical-date start all-day))
         (cons 'DTEND
               (ical-form--format-ical-date end all-day))))
-
-(defun ical-form-remove-event (event)
-  "Remove EVENT."
-  (or (when
-          (;; funcall
-           ;; ical-form-update-event-function
-           maccalfw-remove-event
-           (ical-form-event-get ev 'UID)
-           ;;'remove
-           (ical-form-event-get ev 'DTSTART)
-           (if (ical-form-event-get ev 'RRULE)
-               (ical-form-modify-future-events-p)
-             nil))
-        (run-hook-with-args
-         'ical-form-event-updated-hook
-         event
-         'remove))
-      (error "Deleting event failed")))
 
 (provide 'ical-form)
 ;;; ical-form.el ends here

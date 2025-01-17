@@ -39,6 +39,10 @@
 (require 'calfw)
 (require 'ical-form)
 
+(defvar maccalfw-modify-future-events-p 'ask
+  "If non-nil, modifying events with recurrences applies to future events.
+Special value \\='ask, prompts the user.")
+
 (defun maccalfw--load-module (&optional force)
   "Load an compile dynamic module for maccalfw.
 If FORCE is nil, then the module is not compiled nor re-loaded if
@@ -222,11 +226,48 @@ This command displays any CALENDARS obtained using
              (ical-form-event-get ev 'UID)
              (ical-form-event-get ev 'DTSTART)
              (if (ical-form-event-get ev 'RRULE)
-                 (ical-form-modify-future-events-p)
+               (maccalfw-modify-future-events-p)
              nil))
         (message "Event deleted")
         (cfw:refresh-calendar-buffer nil))
       (error "Deleting event failed")))
+
+(defun maccalfw-modify-future-events-p (&optional prompt)
+  "Return non-nil if modification should affect all future events.
+Check the value of the variable
+`maccalfw-modify-future-events-p', and potentially prompt
+the user, displaying the message PROMPT."
+  (if (eq maccalfw-modify-future-events-p 'ask)
+      (let ((response
+             (cadr
+              (read-multiple-choice
+               (format (or prompt "Which events to modify?")
+                       (buffer-name))
+               '((?f "future" "Modification applies to all future events.")
+                 (?c "current" "Modification applies only to current event."))
+               nil nil (and (not use-short-answers)
+                            (not (use-dialog-box-p)))))))
+        (equal response "future"))
+    maccalfw-modify-future-events-p))
+
+(defun maccalfw-modify-event (old-data new-data)
+  "
+Uses `UID', 'DTSTART' and 'RRULE'
+from this argument to identify the event."
+  ;; if old event has a recurrence, check with use if all future events
+  ;; should be editied or just the current one
+  (let ((future
+         (and (or (ical-form-event-get old-data 'RRULE)
+                  (ical-form-event-get new-data 'RRULE))
+              ;; If changing recurrence rule, then we should modify all
+              ;; future events. Otherwise, we should ask the user
+              (or (ical-form-event-get new-data 'RRULE)
+                  (maccalfw-modify-future-events-p)))))
+    (maccalfw-update-event
+     (ical-form-event-get old-data 'UID)
+     new-data
+     (ical-form-event-get old-data 'DTSTART)
+     future)))
 
 ;; TODO:
 ;; (defun maccalfw-delete-event (event)
