@@ -36,6 +36,9 @@
 
 ;;; Code:
 
+;; We declare it so that it can be used in `ical-form'
+(declare-function maccalfw-modify-event "maccalfw.el")
+
 (require 'calfw)
 (require 'ical-form)
 
@@ -251,9 +254,10 @@ the user, displaying the message PROMPT."
     maccalfw-modify-future-events-p))
 
 (defun maccalfw-modify-event (old-data new-data)
-  "
-Uses `UID', 'DTSTART' and 'RRULE'
-from this argument to identify the event."
+  "Update or create an event.
+Only `UID', 'DTSTART' and 'RRULE' are used from OLD-DATA.
+NEW-DATA can contain only changed fields. If `UID' is missing or
+nil, a new event is created instead."
   ;; if old event has a recurrence, check with use if all future events
   ;; should be editied or just the current one
   (let ((future
