@@ -28,9 +28,11 @@
 (require 'wid-edit)
 (require 'org)
 
-(defcustom ical-form-save-hook nil
-  "Hook called when an event is saved successfully.
-Takes one argument which is the new event data."
+(defcustom ical-form-event-updated-hook nil
+  "Hook called when an event is updated successfully.
+Takes two arguments, the first is the old event data and the
+second is the new event data, or \\='remove if the event was
+removed."
   :type 'hook
   :group 'ical-form)
 
@@ -42,12 +44,15 @@ Special value \\='ask, prompts the user.")
                                              'maccalfw-update-event)
   "Function to call to update/create event.
 
-Expected arguments are (ID CHANGED-DATA START FUTURE)
-where ID and START are the event UID and its start date, which
-should be used to identify the event (even when recurring).
-Future is non-nil when all events should be modified, otherwise
-only the current one. CHANGED-DATA are the field that were
-modified, relative to the current values.")
+Expected arguments are (ID CHANGED-DATA START FUTURE) where ID
+and START are the event UID and its start date, which should be
+used to identify the event (even when recurring). Future is
+non-nil when all events should be modified, otherwise only the
+current one. CHANGED-DATA contain the fields that were modified,
+relative to the current values.
+
+Special value is of CHANGED-DATA is 'remove, in which case the
+event should be removed rather than updated.")
 
 (defface ical-form-notes-field
   '((t
@@ -404,7 +409,8 @@ If DUPLICATE is non-nil, save the event as a new one."
           (when (called-interactively-p 'interactive)
             (message "Event saved."))
           (run-hook-with-args
-           'ical-form-save-hook
+           'ical-form-event-updated-hook
+           old-data
            (widget-get title-wid :event-data)))
       (when (called-interactively-p 'interactive)
         (message "(No changes to event to be saved)")))
@@ -1272,6 +1278,33 @@ treated as new when saved."
 
     ;; reactivate form
     (ical-form--make-inactive t)))
+
+(defun ical-form-create-event (start end all-day) ;
+  "Return an event alist.
+START and END are the start and end time for the event.
+If ALL-DAY is non-nil, the event should be for the whole day."
+  (list (cons 'DTSTART
+              (ical-form--format-ical-date start all-day))
+        (cons 'DTEND
+              (ical-form--format-ical-date end all-day))))
+
+(defun ical-form-remove-event (event)
+  "Remove EVENT."
+  (or (when
+          (;; funcall
+           ;; ical-form-update-event-function
+           maccalfw-remove-event
+           (ical-form-event-get ev 'UID)
+           ;;'remove
+           (ical-form-event-get ev 'DTSTART)
+           (if (ical-form-event-get ev 'RRULE)
+               (ical-form-modify-future-events-p)
+             nil))
+        (run-hook-with-args
+         'ical-form-event-updated-hook
+         event
+         'remove))
+      (error "Deleting event failed")))
 
 (provide 'ical-form)
 ;;; ical-form.el ends here

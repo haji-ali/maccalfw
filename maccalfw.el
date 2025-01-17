@@ -211,59 +211,63 @@ This command displays any CALENDARS obtained using
                #'calfw-blocks-default-sorter
              #'string-lessp)))
 
-
-;; TODO: maccalfw-delete-event should be here, but at the moment
-;; it uses ical-form to check if we should modify future events
-;; this should be abstracted somehow.
-
-(defun maccalfw-delete-event (event)
-  "Delete calfw EVENT."
+(defun maccalfw-delete-event (ev)
+  "Delete EVENT."
   (interactive
-   (list (or (get-text-property (point) 'cfw:event)
+   (list (or (when-let (cfw-ev (get-text-property (point) 'cfw:event))
+               (cfw:event-data cfw-ev))
              (error "No event at location"))))
   (or (prog1
-          (let ((ev (cfw:event-data event)))
             (maccalfw-remove-event
              (ical-form-event-get ev 'UID)
              (ical-form-event-get ev 'DTSTART)
              (if (ical-form-event-get ev 'RRULE)
                  (ical-form-modify-future-events-p)
-               nil)))
+             nil))
         (message "Event deleted")
         (cfw:refresh-calendar-buffer nil))
       (error "Deleting event failed")))
+
+;; TODO:
+;; (defun maccalfw-delete-event (event)
+;;   "Delete calfw EVENT."
+;;   (interactive
+;;    (list (or (get-text-property (point) 'cfw:event)
+;;              (error "No event at location"))))
+;;   (ical-form-remove-event (cfw:event-data event)))
 
 (defun maccalfw-new-event (event-data)
   "Create an events-details buffer for a new event.
 EVENT-DATA contains the initial event information."
   (interactive
    (list
-    (if (derived-mode-p 'cfw:calendar-mode)
+    (let (start end all-day ev)
+      (when (derived-mode-p 'cfw:calendar-mode)
         (if-let ((event (and current-prefix-arg
                              (get-text-property (point) 'cfw:event)))
                  (old-event-data (cfw:event-data event)))
+            (setq ev
             (cl-loop for item in old-event-data
-                     if (member (car item) '(;
+                           if (member (car item) '( ; Keep those fields
                                              DTSTART DTEND
                                              SUMMARY
                                              LOCATION
                                              X-AVAILABILITY
                                              URL
                                              DESCRIPTION))
-                     collect item)
+                           collect item))
           (when (and (fboundp 'calfw-blocks-region-to-time)
                      (eq (cfw:component-view (cfw:cp-get-component))
                          'block-week))
-            (cl-destructuring-bind (start end all-day)
+            (cl-destructuring-bind (e-start e-end e-all-day)
                 (calfw-blocks-region-to-time)
-              (list (cons 'DTSTART (ical-form--format-ical-date start
-                                                                all-day))
-                    (cons 'DTEND (ical-form--format-ical-date
-                                  (or end (time-add start 3600))
-                                  all-day))))))
-      (list (cons 'DTSTART (ical-form--format-ical-date (current-time)))
-            (cons 'DTEND (ical-form--format-ical-date (time-add (current-time)
-                                                                3600)))))))
+              (setq start e-start
+                    end e-end
+                    all-day e-all-day)))))
+      (or ev
+          (let ((start (or start (current-time))))
+            (ical-form-create-event
+             start (or end (time-add start 3600)) all-day))))))
   (ical-form-open event-data
                   (maccalfw-get-calendars)
                   (maccalfw-timezones)))
@@ -297,7 +301,8 @@ EVENT defaults to the event data."
 (make-obsolete 'maccalfw-event-mouse-down
                'maccalfw-mouse-down-disable-dbl-click "0.2")
 (make-obsolete 'maccalfw-event-open 'ical-form-open "0.2")
-(make-obsolete-variable 'maccalfw-event-save-hook 'ical-form-save-hook  "0.2")
+(make-obsolete-variable 'maccalfw-event-save-hook
+                        'ical-form-event-updated-hook  "0.2")
 
 (provide 'maccalfw)
 ;;; maccalfw.el ends here

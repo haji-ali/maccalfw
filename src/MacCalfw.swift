@@ -223,7 +223,7 @@ extension EKEvent {
            // These are currently unused in maccalfw.el
            "X-EMACS-OCCURENCE-DATE" : self.occurrenceDate.toiCal(),
            "X-EMACS-DETACHED-P" : self.isDetached ? "yes" : nil,
-           "X-EMACS-ORGANIZER-CURRENT-USER" : (self.organizer?.isCurrentUser ?? true) ? nil : "yes"]
+           "X-EMACS-ORG-NOT-CUR-USER" : (self.organizer?.isCurrentUser ?? true) ?  nil : "yes"]
 
         var flatArgs : [EmacsCastable?] =
           event_plist.compactMap { (key, value) in
