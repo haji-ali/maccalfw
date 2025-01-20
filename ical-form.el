@@ -382,10 +382,8 @@ If DUPLICATE is non-nil, save the event as a new one."
                       :event-data
                       (funcall
                        ical-form-update-event-function
-                       old-id
                      old-data
-                       new-data
-                     (ical-form-event-get old-data 'DTSTART)))
+                     new-data))
           (when (called-interactively-p 'interactive)
             (message "Event saved."))
           (run-hook-with-args
