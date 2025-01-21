@@ -35,8 +35,7 @@ second is the new event data."
   :type 'hook
   :group 'ical-form)
 
-(defvar ical-form-update-event-function (and (fboundp 'maccalfw-modify-event)
-                                             'maccalfw-modify-event)
+(defvar ical-form-update-event-function 'maccalfw-modify-event
   "Function to call to update/create event.
 
 Expected arguments are (OLD-DATA CHANGED-DATA) where OLD-DATA is
@@ -378,6 +377,7 @@ If DUPLICATE is non-nil, save the event as a new one."
                                         INTERVAL eq
                                         FREQ equal))))))))))
     (if new-data
+        (progn
           (widget-put title-wid
                       :event-data
                       (funcall
@@ -389,7 +389,7 @@ If DUPLICATE is non-nil, save the event as a new one."
           (run-hook-with-args
            'ical-form-event-updated-hook
            old-data
-       (widget-get title-wid :event-data))
+           (widget-get title-wid :event-data)))
       (when (called-interactively-p 'interactive)
         (message "(No changes to event to be saved)")))
     (set-buffer-modified-p nil)))
