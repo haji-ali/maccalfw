@@ -212,7 +212,8 @@ This command displays any CALENDARS obtained using
                                (plist-get x :id)
                                (plist-get x :color)))
     calendars)
-   :sorter (or (bound-and-true-p #'calfw-blocks-default-sorter)
+   :sorter (or (and (fboundp #'calfw-blocks-default-sorter)
+                    #'calfw-blocks-default-sorter)
              #'string-lessp)))
 
 (defun maccalfw-delete-event (ev)
