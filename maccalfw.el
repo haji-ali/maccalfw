@@ -37,8 +37,6 @@
 ;;; Code:
 
 ;; We declare it so that it can be used in `ical-form'
-(declare-function maccalfw-modify-event "maccalfw.el")
-
 (require 'calfw)
 (require 'ical-form)
 
@@ -214,8 +212,7 @@ This command displays any CALENDARS obtained using
                                (plist-get x :id)
                                (plist-get x :color)))
     calendars)
-   :sorter (if (fboundp #'calfw-blocks-default-sorter)
-               #'calfw-blocks-default-sorter
+   :sorter (or (bound-and-true-p #'calfw-blocks-default-sorter)
              #'string-lessp)))
 
 (defun maccalfw-delete-event (ev)
