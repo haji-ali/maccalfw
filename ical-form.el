@@ -142,7 +142,7 @@ specifies the timezone."
                   (all-day "%Y%m%d")
                   (time-zone-id "%Y%m%dT%H%M%S")
                   (t "%Y%m%dT%H%M%SZ")))
-         (time-string (format-time-string format date t)))
+         (time-string (format-time-string format date)))
     (list params time-string)))
 
 (defun ical-form--parse-ical-rrule (ical-list)
