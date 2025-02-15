@@ -5,7 +5,7 @@
 ;; Author: Al Haji-Ali <abdo.haji.ali at gmail.com>
 ;; Created: 2023
 ;; Version: 0.2
-;; Package-Requires: ((emacs "28.1"))
+;; Package-Requires: ((emacs "28.1") (compat "29.1"))
 ;; Homepage: https://github.com/haji-ali/maccalfw
 ;; Keywords: calendar
 
@@ -27,6 +27,7 @@
 ;;; Code:
 (require 'wid-edit)
 (require 'org)
+(require 'compat)
 
 (defcustom ical-form-event-updated-hook nil
   "Hook called when an event is updated successfully.
@@ -47,7 +48,7 @@ were modified, relative to the old values.")
      :inherit widget-field
      :box (:line-width (0 . 0))))
   "Face used for editable fields."
-  :version "28.1")
+  :group 'ical-form)
 
 (defface ical-form-title-field
   '((t
@@ -56,13 +57,13 @@ were modified, relative to the old values.")
      :weight bold
      :family sans-serif))
   "Face used for editable fields."
-  :version "28.1")
+  :group 'ical-form)
 
 (defface ical-form-field-names
   '((t
      :weight bold))
   "Face used for field names."
-  :version "28.1")
+  :group 'ical-form)
 
 (defvar-keymap ical-form--custom-map
   :doc "Keymap including custom bindings for `ical-form'."
@@ -407,7 +408,8 @@ If DUPLICATE is non-nil, save the event as a new one."
                (?n "no" "exit without doing anything")
                (?s "save and then kill" "save the even and then kill buffer"))
              nil nil (and (not use-short-answers)
-                          (not (use-dialog-box-p)))))))
+                          (and (fboundp 'use-dialog-box-p)
+                               (not (use-dialog-box-p))))))))
       (if (equal response "no")
           nil
         (unless (equal response "yes")
@@ -803,18 +805,18 @@ it."
   (let ((timezones ical-form--timezones)
         (calendars ical-form--calendars)
         (default-timezone ical-form--default-timezone))
-  (when (and
-         (derived-mode-p 'ical-form-mode)
-         (or (not (buffer-modified-p))
-             (kill-buffer--possibly-save (current-buffer))))
-    (unless no-erase
-      (let ((inhibit-read-only t)
-            (inhibit-modification-hooks t))
-        (kill-all-local-variables)
-        (erase-buffer)
-        (delete-all-overlays)))
+    (when (and
+           (derived-mode-p 'ical-form-mode)
+           (or (not (buffer-modified-p))
+               (ical-form-save-maybe)))
+      (unless no-erase
+        (let ((inhibit-read-only t)
+              (inhibit-modification-hooks t))
+          (kill-all-local-variables)
+          (erase-buffer)
+          (delete-all-overlays)))
 
-    (ical-form-mode)
+      (ical-form-mode)
 
       (setq
        ical-form--calendars calendars
@@ -823,10 +825,10 @@ it."
 
       (ical-form--create-form event)
 
-    (setq-local
-     header-line-format
-     (substitute-command-keys
-      "\\<ical-form-mode-map>Event details. \
+      (setq-local
+       header-line-format
+       (substitute-command-keys
+        "\\<ical-form-mode-map>Event details. \
 Save `\\[ical-form-save]', \
 abort `\\[ical-form-kill]'."))
       (set-buffer-modified-p nil))))
@@ -1022,14 +1024,14 @@ abort `\\[ical-form-kill]'."))
                 :format "on %v\n"
                 :value ,(alist-get 'BYMONTH recur))
               (cl-loop
-               with lst = parse-time-months
-               with len = (1+ (length lst))
+               with lst = '("JAN" "FEB" "MAR" "APR"
+                            "MAY" "JUN" "JUL" "AUG"
+                            "SEP" "OCT" "NOV" "DEC")
                for w in lst
-               for idx from 0
-               while (< idx (/ len 2))
+               for idx from 1
                collect `(item :format "%t "
-                              :tag ,(capitalize (car w))
-                              ,(cdr w))))
+                              :tag ,w
+                              ,idx)))
              `(editable-field
                :field-key recurrence-byweekno
                :value-to-external ical-form--parse-integer-list-field

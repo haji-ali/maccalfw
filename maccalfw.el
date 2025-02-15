@@ -247,7 +247,8 @@ the user, displaying the message PROMPT."
                '((?f "future" "Modification applies to all future events.")
                  (?c "current" "Modification applies only to current event."))
                nil nil (and (not use-short-answers)
-                            (not (use-dialog-box-p)))))))
+                            (and (fboundp 'use-dialog-box-p)
+                                 (not (use-dialog-box-p))))))))
         (equal response "future"))
     maccalfw-modify-future-events-p))
 
