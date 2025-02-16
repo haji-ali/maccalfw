@@ -5,7 +5,7 @@
 ;; Author: Al Haji-Ali <abdo.haji.ali at gmail.com>
 ;; Created: 2023
 ;; Version: 0.2
-;; Package-Requires: ((emacs "28.1") (compat "29.1"))
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/haji-ali/maccalfw
 ;; Keywords: calendar
 
@@ -27,7 +27,6 @@
 ;;; Code:
 (require 'wid-edit)
 (require 'org)
-(require 'compat)
 
 (defcustom ical-form-event-updated-hook nil
   "Hook called when an event is updated successfully.
