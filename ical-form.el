@@ -35,6 +35,9 @@ second is the new event data."
   :type 'hook
   :group 'ical-form)
 
+(defcustom ical-form-render-html-p 'ignore
+  "A function to detect if an event content should be rendered in shr.")
+
 (defvar ical-form-update-event-function 'maccalfw-modify-event
   "Function to call to update/create event.
 
@@ -792,6 +795,20 @@ checkbox."
                       (ical-form--show-hide-widget
                        wid (cl-some 'identity vis))))))
 
+(defun ical-form--html-content-maybe (content)
+  "Insert content rendered as HTML using shr.
+If the function in `ical-form-render-html-p' returns nil, just
+return CONTENT as is, otherwise return a rendering in SHR."
+  ;; Inspired by `notmuch-show--insert-part-text/html-shr'
+  (if (funcall ical-form-render-html-p content)
+      (with-temp-buffer
+        (shr-insert-document
+         (with-temp-buffer
+           (insert content)
+           (libxml-parse-html-region (point-min) (point-max))))
+        (buffer-substring (point-min) (point-max)))
+    content))
+
 (defun ical-form-rebuild-buffer (event &optional no-erase)
   "Rebuild ical-form buffer from EVENT.
 If NO-ERASE is non-nil, do not reset the buffer before rebuilding
@@ -1192,7 +1209,8 @@ abort `\\[ical-form-kill]'."))
      :format "%v" ; Text after the field!
      :keymap ical-form-text-map
      :value-face 'ical-form-notes-field
-     (or (ical-form-event-get  event 'DESCRIPTION) ""))
+     (ical-form--html-content-maybe
+      (or (ical-form-event-get  event 'DESCRIPTION) "")))
 
     (widget-setup)
 
