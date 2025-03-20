@@ -958,7 +958,7 @@ abort `\\[ical-form-kill]'."))
      :entry-format "%b %v "
      :format "%v\n\n"
      :value (or
-             (ical-form-event-get event 'X-AVAILABLITY) 'busy)
+             (ical-form-event-get event 'X-EMACS-AVAILABILITY) 'busy)
      '(item :format "%[Tentative%] " :value tentative)
      '(item :format "%[Free%] " :value free)
      '(item :format "%[Busy%] " :value busy)
@@ -1250,7 +1250,7 @@ treated as new when saved."
   (interactive)
   (let* ((data (ical-form-data)))
     (setf (alist-get 'UID data) nil
-          (alist-get 'X-READ-ONLY data) nil)
+          (alist-get 'X-EMACS-READ-ONLY data) nil)
 
     ;; If calendar is read-only, we'll an error will be issued when trying to
     ;; save. So might as well not change it.
