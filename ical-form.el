@@ -1258,14 +1258,14 @@ treated as new when saved."
     ;; reactivate form
     (ical-form--make-inactive t)))
 
-(defun ical-form-create-event (start end all-day) ;
+(defun ical-form-create-event (start end &optional all-day time-zone-id) ;
   "Return an event alist.
 START and END are the start and end time for the event.
 If ALL-DAY is non-nil, the event should be for the whole day."
   (list (cons 'DTSTART
-              (ical-form--format-ical-date start all-day))
+              (ical-form--format-ical-date start all-day time-zone-id))
         (cons 'DTEND
-              (ical-form--format-ical-date end all-day))))
+              (ical-form--format-ical-date end all-day time-zone-id))))
 
 (provide 'ical-form)
 ;;; ical-form.el ends here

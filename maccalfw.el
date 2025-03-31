@@ -311,7 +311,10 @@ EVENT-DATA contains the initial event information."
       (or ev
           (let ((start (or start (current-time))))
             (ical-form-create-event
-             start (or end (time-add start 3600)) all-day))))))
+             start (or end (time-add start 3600)) all-day
+             (car-safe (cl-find-if
+                        (lambda (x) (plist-get (cdr x) :default))
+                        (maccalfw-timezones)))))))))
   (ical-form-open event-data
                   (maccalfw-get-calendars)
                   (maccalfw-timezones)))
