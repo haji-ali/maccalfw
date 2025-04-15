@@ -311,16 +311,14 @@ If DUPLICATE is non-nil, save the event as a new one."
                  (if all-day
                      "00:00"
                    (ical-form--value 'start-time widgets))
-                 (ical-form--value 'start-date widgets)
-                 tz))
+                 (ical-form--value 'start-date widgets)))
          (end (ical-form--parse-datetime
                (if all-day
                    "23:59:59"
                  (ical-form--value 'end-time widgets))
                (if all-day
                    (ical-form--value 'end-date widgets)
-                 (ical-form--value 'start-date widgets))
-               tz))
+                 (ical-form--value 'start-date widgets))))
          (old-id (unless duplicate
                    (ical-form-event-get old-data 'UID)))
          (new-data
@@ -687,7 +685,8 @@ Assumes time is in the default timezone."
 (defun ical-form--parse-datetime (time-str date-str &optional timezone)
   "Parse time and return the time in the default-time zone.
 Time is in DATE-STR and TIME-STR is assumed to be in a given
-TIMEZONE."
+TIMEZONE. If TIMEZONE, convert back to default time zone in
+`ical-form--default-timezone'."
   (let ((tz (and timezone (alist-get timezone ical-form--timezones
                                      nil nil #'equal)))
         (time (encode-time
