@@ -126,8 +126,7 @@ The event is returned `maccalfw-fetch-events'."
            :start-date  (maccalfw--decode-date start)
            :start-time  (unless all-day-p
                           (maccalfw--decode-time start))
-           :end-date    (when all-day-p
-                          (maccalfw--decode-date end))
+           :end-date    (maccalfw--decode-date end)
            :end-time    (unless all-day-p
                           (maccalfw--decode-time end))
            :title       (ical-form-event-get event 'SUMMARY)
@@ -146,7 +145,8 @@ The event is returned `maccalfw-fetch-events'."
   (cl-loop for e in events-list
            for event = (maccalfw--convert-event e)
            if event
-           if (cfw:event-end-date event)
+           if (not (or (cfw:event-start-time event)
+                       (cfw:event-end-time event)))
            collect event into periods
            else
            collect event into contents
