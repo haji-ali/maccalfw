@@ -383,7 +383,7 @@ If DUPLICATE is non-nil, save the event as a new one."
                       :event-data
                       (funcall
                        ical-form-update-event-function
-                     old-data
+                       (unless new-event old-data)
                      new-data))
           (when (called-interactively-p 'interactive)
             (message "Event saved."))
