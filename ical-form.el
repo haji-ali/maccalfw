@@ -48,7 +48,7 @@ were modified, relative to the old values.")
 (defface ical-form-notes-field
   '((t
      :inherit widget-field
-     :box (:line-width (0 . 0))))
+     :box nil))
   "Face used for editable fields."
   :group 'ical-form)
 
