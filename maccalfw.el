@@ -24,21 +24,31 @@
 
 ;;; Commentary:
 
-;; Bridge from Mac Calendar to calfw. The API and interfaces have not been
-;; confirmed yet.
+;; Bridge from Mac Calendar to calfw.
 
 ;;; Installation:
 
 ;; Here is a minimum sample code:
 ;; (require 'maccalfw)
 ;; To open a calendar buffer, execute the following function.
-;; (cfw:open-maccal-calendar 'all)
+;; (maccalfw-open 'all)
 
 ;;; Code:
 
 ;; We declare it so that it can be used in `ical-form'
 (require 'calfw)
 (require 'ical-form)
+
+(setq ical-form-update-event-function #'maccalfw-modify-event)
+
+(declare-function maccalfw-timezones "libmaccalfw" ())
+(declare-function maccalfw-get-calendars "libmaccalfw" ())
+(declare-function maccalfw-update-event "libmaccalfw"
+                  (id changed-data &optional start future))
+(declare-function maccalfw-remove-event "libmaccalfw"
+                  (id &optional start future))
+(declare-function maccalfw-fetch-events "libmaccalfw"
+                  (calendar-id start-time end-time))
 
 (defvar maccalfw-modify-future-events-p 'ask
   "If non-nil, modifying events with recurrences applies to future events.
@@ -138,7 +148,7 @@ The event is returned `maccalfw-fetch-events'."
             (append args (list
                           :status (ical-form-event-get event 'STATUS)
                           :data        event))))
-    (apply 'make-cfw:event args)))
+    (apply #'make-cfw:event args)))
 
 (defun maccalfw--convert-to-calfw (events-list)
   "Convert an EVENTS-LIST to calfw events."
@@ -212,12 +222,12 @@ This command displays any CALENDARS obtained using
                                (plist-get x :id)
                                (plist-get x :color)))
     calendars)
-   :sorter (or (and (fboundp #'calfw-blocks-default-sorter)
+   :sorter (or (and (fboundp 'calfw-blocks-default-sorter)
                     #'calfw-blocks-default-sorter)
              #'string-lessp)))
 
 (defun maccalfw-delete-event (ev)
-  "Delete EVENT."
+  "Delete event EV."
   (interactive
    (list (or (when-let (cfw-ev (get-text-property (point) 'cfw:event))
                (cfw:event-data cfw-ev))
@@ -247,7 +257,7 @@ the user, displaying the message PROMPT."
                '((?f "future" "Modification applies to all future events.")
                  (?c "current" "Modification applies only to current event."))
                nil nil (and (not use-short-answers)
-                            (and (fboundp 'use-dialog-box-p)
+                            (and (fboundp #'use-dialog-box-p)
                                  (not (use-dialog-box-p))))))))
         (equal response "future"))
     maccalfw-modify-future-events-p))
@@ -341,15 +351,18 @@ EVENT defaults to the event data."
         (setcar (nthcdr 2 event) 1))
     (mouse-drag-region event)))
 
-(make-obsolete 'maccalfw-event-new-event'maccalfw-new-event "0.2")
-(make-obsolete 'maccalfw-event-goto-details
-               'maccalfw-goto-event-details "0.2")
-(make-obsolete 'maccalfw-event-delete-event 'maccalfw-delete-event  "0.2")
-(make-obsolete 'maccalfw-event-mouse-down
-               'maccalfw-mouse-down-disable-dbl-click "0.2")
-(make-obsolete 'maccalfw-event-open 'ical-form-open "0.2")
-(make-obsolete-variable 'maccalfw-event-save-hook
-                        'ical-form-event-updated-hook  "0.2")
+(define-obsolete-function-alias
+  'maccalfw-event-new-event #'maccalfw-new-event "0.2")
+(define-obsolete-function-alias
+  'maccalfw-event-goto-details #'maccalfw-goto-event-details "0.2")
+(define-obsolete-function-alias
+  'maccalfw-event-delete-event #'maccalfw-delete-event  "0.2")
+(define-obsolete-function-alias
+  'maccalfw-event-mouse-down #'maccalfw-mouse-down-disable-dbl-click "0.2")
+(define-obsolete-function-alias
+  'maccalfw-event-open #'ical-form-open "0.2")
+(define-obsolete-variable-alias
+  'maccalfw-event-save-hook 'ical-form-event-updated-hook  "0.2")
 
 (provide 'maccalfw)
 ;;; maccalfw.el ends here

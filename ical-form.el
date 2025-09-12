@@ -24,6 +24,8 @@
 
 ;;; Commentary:
 
+;; This package creates a widget form for editing ical events.
+
 ;;; Code:
 (require 'wid-edit)
 (require 'org)
@@ -35,15 +37,19 @@ second is the new event data."
   :type 'hook
   :group 'ical-form)
 
-(defcustom ical-form-render-html-p 'ignore
-  "A function to detect if an event content should be rendered in shr.")
+(defcustom ical-form-render-html-p #'ignore
+  "A function to detect if an event content should be rendered in shr."
+  :type 'function
+  :group 'ical-form)
 
-(defvar ical-form-update-event-function 'maccalfw-modify-event
+(defcustom ical-form-update-event-function #'ignore
   "Function to call to update/create event.
 
 Expected arguments are (OLD-DATA CHANGED-DATA) where OLD-DATA is
 the event OLD-DATA, if any. CHANGED-DATA contain the fields that
-were modified, relative to the old values.")
+were modified, relative to the old values."
+  :type 'function
+  :group 'ical-form)
 
 (defface ical-form-notes-field
   '((t
@@ -97,8 +103,7 @@ were modified, relative to the old values.")
   :lighter " Calfw event"
   (use-local-map ical-form-mode-map)
   (make-local-variable 'kill-buffer-query-functions)
-  (add-to-list 'kill-buffer-query-functions
-               'ical-form-save-maybe))
+  (add-to-list 'kill-buffer-query-functions #'ical-form-save-maybe))
 
 (defvar-local ical-form--timezones nil)
 (defvar-local ical-form--calendars nil)
@@ -178,7 +183,7 @@ Returns a list (DATE IS-ALL-DAY TIME-ZONE)."
                                 (string-to-number (match-string 1 x))))))
                     (string-split value "," t trim)))
                   (otherwise (mapcar
-                              'string-to-number
+                              #'string-to-number
                               (string-split value "," t trim)))))))
         (and (cadr ical-list)
              (string-split (cadr ical-list) ";" t trim)))))))
@@ -368,7 +373,7 @@ If DUPLICATE is non-nil, save the event as a new one."
                                 (not (ical-form--diff-alist
                                       (cdr (ical-form--parse-ical-rrule x))
                                       (cdr (ical-form--parse-ical-rrule y))
-                                      :test 'seq-set-equal-p
+                                      :test #'seq-set-equal-p
                                       :test-plist
                                       '(;
                                         ;; ignore this value
@@ -408,7 +413,7 @@ If DUPLICATE is non-nil, save the event as a new one."
                (?n "no" "exit without doing anything")
                (?s "save and then kill" "save the even and then kill buffer"))
              nil nil (and (not use-short-answers)
-                          (and (fboundp 'use-dialog-box-p)
+                          (and (fboundp #'use-dialog-box-p)
                                (not (use-dialog-box-p))))))))
       (if (equal response "no")
           nil
@@ -427,7 +432,7 @@ case the end time/date is set."
                 (let ((wid (widget-at)))
                   (if (and wid
                            (eq (widget-get wid :value-to-external)
-                               'ical-form--parse-date-field))
+                               #'ical-form--parse-date-field))
                       wid
                     (if (or current-prefix-arg
                             (when-let ((wid (widget-at (point)))
@@ -710,9 +715,7 @@ TIMEZONE. If TIMEZONE, convert back to default time zone in
   "Parse VALUE of WIDGET as a list of integers delimited by non-numbers."
   (unless (string-empty-p value)
     ;; TODO: This doesn't resolve cases such as "1-2"
-    (mapcar
-     'string-to-number
-     (string-split value "[^-[:digit:]]+" t))))
+    (mapcar #'string-to-number (string-split value "[^-[:digit:]]+" t))))
 
 (defun ical-form--parse-date-field (_widget value)
   "Parse VALUE of WIDGET as a date."
@@ -792,7 +795,7 @@ checkbox."
                       when wid
                       do
                       (ical-form--show-hide-widget
-                       wid (cl-some 'identity vis))))))
+                       wid (cl-some #'identity vis))))))
 
 (defun ical-form--html-content-maybe (content)
   "Insert content rendered as HTML using shr.
@@ -1124,7 +1127,7 @@ abort `\\[ical-form-kill]'."))
        :hs (ical-form--checkbox-hs 'recurrence)
        recur)
 
-      (apply 'widget-create
+      (apply #'widget-create
              'group
              :format (concat (propertize ":" 'display "") "%v")
              :field-key 'recurrence
@@ -1218,7 +1221,7 @@ abort `\\[ical-form-kill]'."))
       ;; state.
       (cl-loop for wid in widgets
                for notify = (widget-get wid :notify)
-               when (eq notify 'ical-form--hs-action)
+               when (eq notify #'ical-form--hs-action)
                do (funcall notify wid))
 
       ;; This causes all lists of radio buttons to skip text when tabbing,
