@@ -5,7 +5,7 @@
 ;; Author: Al Haji-Ali <abdo.haji.ali at gmail.com>
 ;; Created: 2023
 ;; Version: 0.2
-;; Package-Requires: ((emacs "29.1") (calfw "1.7"))
+;; Package-Requires: ((emacs "29.1") (calfw "2.0"))
 ;; Homepage: https://github.com/haji-ali/maccalfw
 ;; Keywords: calendar
 
@@ -148,15 +148,15 @@ The event is returned `maccalfw-fetch-events'."
             (append args (list
                           :status (ical-form-event-get event 'STATUS)
                           :data        event))))
-    (apply #'make-cfw:event args)))
+    (apply #'make-calfw-event args)))
 
 (defun maccalfw--convert-to-calfw (events-list)
   "Convert an EVENTS-LIST to calfw events."
   (cl-loop for e in events-list
            for event = (maccalfw--convert-event e)
            if event
-           if (not (or (cfw:event-start-time event)
-                       (cfw:event-end-time event)))
+           if (not (or (calfw-event-start-time event)
+                       (calfw-event-end-time event)))
            collect event into periods
            else
            collect event into contents
@@ -190,7 +190,7 @@ events between BEGIN and END are returned."
 CAL-ID is the ID of the calendar and get be obtained with
 `maccalfw-get-calendars'. The calendar's NAME and COLOR are set
 accordingly."
-  (make-cfw:source
+  (make-calfw-source
    :name name
    :color color
    :update #'ignore
@@ -211,7 +211,7 @@ This command displays any CALENDARS obtained using
   (maccalfw--load-module)
   (when (eq calendars 'all)
     (setq calendars (maccalfw-get-calendars)))
-  (cfw:open-calendar-buffer
+  (calfw-open-calendar-buffer
    :view (if (featurep 'calfw-blocks)
              'block-week
            'week)
@@ -230,7 +230,7 @@ This command displays any CALENDARS obtained using
   "Delete event EV."
   (interactive
    (list (or (when-let (cfw-ev (get-text-property (point) 'cfw:event))
-               (cfw:event-data cfw-ev))
+               (calfw-event-data cfw-ev))
              (error "No event at location"))))
   (or (prog1
             (maccalfw-remove-event
@@ -240,7 +240,7 @@ This command displays any CALENDARS obtained using
                (maccalfw-modify-future-events-p)
              nil))
         (message "Event deleted")
-        (cfw:refresh-calendar-buffer nil))
+        (calfw-refresh-calendar-buffer nil))
       (error "Deleting event failed")))
 
 (defun maccalfw-modify-future-events-p (&optional prompt)
@@ -288,7 +288,7 @@ nil, a new event is created instead."
 ;;   (interactive
 ;;    (list (or (get-text-property (point) 'cfw:event)
 ;;              (error "No event at location"))))
-;;   (ical-form-remove-event (cfw:event-data event)))
+;;   (ical-form-remove-event (calfw-event-data event)))
 
 (defun maccalfw-new-event (event-data)
   "Create an events-details buffer for a new event.
@@ -296,10 +296,10 @@ EVENT-DATA contains the initial event information."
   (interactive
    (list
     (let (start end all-day ev)
-      (when (derived-mode-p 'cfw:calendar-mode)
+      (when (derived-mode-p 'calfw-calendar-mode)
         (if-let ((event (and current-prefix-arg
                              (get-text-property (point) 'cfw:event)))
-                 (old-event-data (cfw:event-data event)))
+                 (old-event-data (calfw-event-data event)))
             (setq ev
             (cl-loop for item in old-event-data
                            if (member (car item) '( ; Keep those fields
@@ -311,7 +311,7 @@ EVENT-DATA contains the initial event information."
                                              DESCRIPTION))
                            collect item))
           (when (and (fboundp 'calfw-blocks-region-to-time)
-                     (eq (cfw:component-view (cfw:cp-get-component))
+                     (eq (calfw-component-view (calfw-cp-get-component))
                          'block-week))
             (cl-destructuring-bind (e-start e-end e-all-day)
                 (calfw-blocks-region-to-time)
@@ -334,7 +334,7 @@ EVENT-DATA contains the initial event information."
   (interactive
    (list (or (get-text-property (point) 'cfw:event)
              (error "No event at location"))))
-  (ical-form-open (cfw:event-data event)
+  (ical-form-open (calfw-event-data event)
                   (maccalfw-get-calendars)
                   (maccalfw-timezones)))
 
