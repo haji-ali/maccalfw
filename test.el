@@ -5,9 +5,9 @@
 ;;                                                        module-file-suffix)
 ;;                              t))
 
-(message "%S" (cl-find-if
-               (lambda (x) (plist-get x :default))
-               (maccalfw-timezones)))
+;; (message "%S" (cl-find-if
+;;                (lambda (x) (plist-get x :default))
+;;                (maccalfw-timezones)))
 
 ;; (condition-case err
 ;;     (maccalfw--test '(:hello "World" :test "testing" :id "MyID" :wrong))

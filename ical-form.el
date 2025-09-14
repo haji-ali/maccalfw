@@ -133,7 +133,7 @@ Returns a list (DATE (ALL-DAY-P val) (TZ val))."
                               "T000000"
                             "")))))
       (if parsed-date
-          (list (apply 'encode-time parsed-date)
+          (list (apply #'encode-time parsed-date)
                 `(ALL-DAY-P . ,is-all-day)
                 `(TZID . ,time-zone-id))
         (error "Failed to parse iCal list")))))
@@ -881,7 +881,7 @@ abort `\\[ical-form-kill]'."))
                             :value ,(plist-get x :id)
                             :editable ,(plist-get x :editable)))))
       (apply
-       'widget-create
+       #'widget-create
        'menu-choice
        :field-key 'calendar-id
        :tag "Calendar"
@@ -944,7 +944,7 @@ abort `\\[ical-form-kill]'."))
                               :details x))
                      timezones)))
       (apply
-       'widget-create
+       #'widget-create
        'menu-choice
        :field-key 'timezone
        :notify #'ical-form--timezone-widget-notify
@@ -1262,8 +1262,9 @@ treated as new when saved."
 
 (defun ical-form-create-event (start end &optional all-day time-zone-id) ;
   "Return an event alist.
-START and END are the start and end time for the event.
-If ALL-DAY is non-nil, the event should be for the whole day."
+START and END are the start and end time for the event. If
+ALL-DAY is non-nil, the event should be for the whole day.
+TIME-ZONE-ID specifies the timezone."
   (list (cons 'DTSTART
               (ical-form--format-ical-date start all-day time-zone-id))
         (cons 'DTEND
