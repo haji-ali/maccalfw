@@ -1235,8 +1235,16 @@ abort `\\[ical-form-kill]'."))
     (widget-move 1) ;; Go to next widget (should be title)
     (widget-end-of-line) ;; Go to end of line
 
+    (add-hook 'post-command-hook #'ical-form--avoid-point-max nil t)
+
     (when (ical-form-event-get event 'X-EMACS-READ-ONLY)
       (ical-form--make-inactive))))
+
+(defun ical-form--avoid-point-max ()
+  "Keep point from being at point-max unless buffer is empty."
+  (when (and (> (point-max) (point-min))
+             (= (point) (point-max)))
+    (backward-char)))
 
 (defun ical-form-data ()
   "Return event data of current event."
