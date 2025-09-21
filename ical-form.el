@@ -551,8 +551,7 @@ timezones to use in the form."
   "Create an overlay around WIDGET, setting its PROPS.
 KEY is used to save the overlay in the widget.
 If DELETE is non-nil, delete the widget instead."
-  (unless (eq (null (widget-get widget key))
-              (not (null delete)))
+  (unless (xor (widget-get widget key) delete)
     (if delete
         (progn
           (delete-overlay (widget-get widget key))
@@ -1242,8 +1241,7 @@ abort `\\[ical-form-kill]'."))
 
 (defun ical-form--avoid-point-max ()
   "Keep point from being at point-max unless buffer is empty."
-  (when (and (> (point-max) (point-min))
-             (= (point) (point-max)))
+  (when (and (> (point-max) (point-min)) (eobp))
     (backward-char)))
 
 (defun ical-form-data ()
