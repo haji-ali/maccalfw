@@ -5,7 +5,7 @@
 ;; Author: Al Haji-Ali <abdo.haji.ali at gmail.com>
 ;; Created: 2023
 ;; Version: 0.2
-;; Package-Requires: ((emacs "29.1") (calfw "2.0"))
+;; Package-Requires: ((emacs "29.1") (calfw "2.0") (ical-form "0.2"))
 ;; Homepage: https://github.com/haji-ali/maccalfw
 ;; Keywords: calendar
 
@@ -35,11 +35,8 @@
 
 ;;; Code:
 
-;; We declare it so that it can be used in `ical-form'
 (require 'calfw)
 (require 'ical-form)
-
-(setq ical-form-update-event-function #'maccalfw-modify-event)
 
 (declare-function maccalfw-timezones "libmaccalfw" ())
 (declare-function maccalfw-get-calendars "libmaccalfw" ())
@@ -264,9 +261,9 @@ the user, displaying the message PROMPT."
 
 (defun maccalfw-modify-event (old-data new-data)
   "Update or create an event.
-Only `UID', 'DTSTART' and 'RRULE' are used from OLD-DATA.
-NEW-DATA can contain only changed fields. If `UID' is missing or
-nil, a new event is created instead."
+Only UID, DTSTART and RRULE are used from OLD-DATA. NEW-DATA can
+contain only changed fields. If UID is missing or nil, a new
+event is created instead."
   ;; if old event has a recurrence, check with use if all future events
   ;; should be editied or just the current one
   (let ((future
@@ -327,7 +324,8 @@ EVENT-DATA contains the initial event information."
                         (maccalfw-timezones)))))))))
   (ical-form-open event-data
                   (maccalfw-get-calendars)
-                  (maccalfw-timezones)))
+                  (maccalfw-timezones)
+                  #'maccalfw-modify-event))
 
 (defun maccalfw-goto-event-details (event)
   "Open event details for the calfw EVENT."
@@ -336,7 +334,8 @@ EVENT-DATA contains the initial event information."
              (error "No event at location"))))
   (ical-form-open (calfw-event-data event)
                   (maccalfw-get-calendars)
-                  (maccalfw-timezones)))
+                  (maccalfw-timezones)
+                  #'maccalfw-modify-event))
 
 
 (defun maccalfw-mouse-down-disable-dbl-click (event)

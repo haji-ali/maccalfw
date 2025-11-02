@@ -527,20 +527,24 @@ case the end time/date is set."
                  end-time-wid
                  (ical-form--format-time new-time))))))))))
 
-(defun ical-form-open (event calendars timezones)
+(defun ical-form-open (event calendars timezones &optional update-fn)
   "Open a buffer to display the details of EVENT.
 CALENDARS and TIMEZONES should be a list of calendars, and
 timezones to use in the form."
-  (pop-to-buffer (generate-new-buffer "*calender event*"))
-  (ical-form-mode)
-  (setq
-   ical-form--calendars calendars
-   ical-form--timezones timezones
-   ical-form--default-timezone
-   (cl-find-if
-    (lambda (x) (plist-get (cdr x) :default))
-    ical-form--timezones))
-  (ical-form-rebuild-buffer event t))
+  (let ((buf (generate-new-buffer "*calender event*")))
+    (pop-to-buffer buf)
+    (ical-form-mode)
+    (when update-fn
+      (setq-local ical-form-update-event-function update-fn))
+    (setq
+     ical-form--calendars calendars
+     ical-form--timezones timezones
+     ical-form--default-timezone
+     (cl-find-if
+      (lambda (x) (plist-get (cdr x) :default))
+      ical-form--timezones))
+    (ical-form-rebuild-buffer event t)
+    buf))
 
 (defun ical-form-read-only (&rest _junk)
   "Ignoring the arguments, signal an error."
