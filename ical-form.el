@@ -530,7 +530,10 @@ case the end time/date is set."
 (defun ical-form-open (event calendars timezones &optional update-fn)
   "Open a buffer to display the details of EVENT.
 CALENDARS and TIMEZONES should be a list of calendars, and
-timezones to use in the form."
+timezones to use in the form.
+
+UPDATE-FN, if provided, is used to set
+`ical-form-update-event-function' locally in the new buffer."
   (let ((buf (generate-new-buffer "*calender event*")))
     (pop-to-buffer buf)
     (ical-form-mode)
