@@ -46,4 +46,4 @@ This is how my calendar looks vs my Apple's calendar.
 [[file:calendars.png]]
 
 If you want to recreate a similar parity with Apple's calendar then you may
-want to use my forks of [[https://github.com/haji-ali/emacs-calfw][calfw]] and [[https://github.com/haji-ali/calfw-blocks][calfw-blocks]].
+want to use my fork [[https://github.com/haji-ali/calfw-blocks][calfw-blocks]].
