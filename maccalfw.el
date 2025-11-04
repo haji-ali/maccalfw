@@ -139,8 +139,8 @@ The event is returned `maccalfw-fetch-events'."
            :title       (ical-form-event-get event 'SUMMARY)
            :location    (ical-form-event-get event 'LOCATION)
            :description (ical-form-event-get event 'DESCRIPTION))))
-    (when (and (alist-get 'status (cl-struct-slot-info 'cfw:event))
-               (alist-get 'data (cl-struct-slot-info 'cfw:event)))
+    (when (and (alist-get 'status (cl-struct-slot-info 'calfw-event))
+               (alist-get 'data (cl-struct-slot-info 'calfw-event)))
       (setq args
             (append args (list
                           :status (ical-form-event-get event 'STATUS)
@@ -183,7 +183,7 @@ events between BEGIN and END are returned."
            collect event))
 
 (defun maccalfw--create-source (name cal-id color)
-  "Create a cfw:source out of a calendar.
+  "Create a calfw-source out of a calendar.
 CAL-ID is the ID of the calendar and get be obtained with
 `maccalfw-get-calendars'. The calendar's NAME and COLOR are set
 accordingly."
@@ -278,14 +278,6 @@ event is created instead."
      new-data
      (ical-form-event-get old-data 'DTSTART)
      future)))
-
-;; TODO:
-;; (defun maccalfw-delete-event (event)
-;;   "Delete calfw EVENT."
-;;   (interactive
-;;    (list (or (get-text-property (point) 'cfw:event)
-;;              (error "No event at location"))))
-;;   (ical-form-remove-event (calfw-event-data event)))
 
 (defun maccalfw-new-event (event-data)
   "Create an events-details buffer for a new event.
