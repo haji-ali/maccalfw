@@ -42,7 +42,8 @@ second is the new event data."
   :type 'function
   :group 'ical-form)
 
-(defcustom ical-form-update-event-function #'ignore
+(defcustom ical-form-update-event-function
+  (lambda (&rest _) (error "ical-form update function not set."))
   "Function to call to update/create event.
 
 Expected arguments are (OLD-DATA CHANGED-DATA) where OLD-DATA is
@@ -828,7 +829,9 @@ it."
      (list event nil)))
   (let ((timezones ical-form--timezones)
         (calendars ical-form--calendars)
-        (default-timezone ical-form--default-timezone))
+        (default-timezone ical-form--default-timezone)
+        (local-update-fn (local-variable-p 'ical-form-update-event-function))
+        (update-fn ical-form-update-event-function))
     (when (and
            (derived-mode-p 'ical-form-mode)
            (or (not (buffer-modified-p))
@@ -841,6 +844,12 @@ it."
           (delete-all-overlays)))
 
       (ical-form-mode)
+
+      ;; Recover local-update function. We could instead mark the variable
+      ;; permanently local. But my thinking is that this variable is
+      ;; mode-specific and should not be
+      (when local-update-fn
+        (setq-local ical-form-update-event-function update-fn))
 
       (setq
        ical-form--calendars calendars
