@@ -43,7 +43,7 @@ second is the new event data."
   :group 'ical-form)
 
 (defcustom ical-form-update-event-function
-  (lambda (&rest _) (error "ical-form update function not set."))
+  (lambda (&rest _) (error "`ical-form-update-event-function' not set correctly."))
   "Function to call to update/create event.
 
 Expected arguments are (OLD-DATA CHANGED-DATA) where OLD-DATA is
