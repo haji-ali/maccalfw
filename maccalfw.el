@@ -161,7 +161,7 @@ The event is returned `maccalfw-fetch-events'."
            (progn
              (message "Ignoring event \"%s\"" e)
              (message "Cannot handle this event, tag: %s" e))
-           finally (return `((periods ,periods) ,@contents))))
+           finally return `((periods ,periods) ,@contents)))
 
 (defun maccalfw--get-calendar-events (cal-id begin end)
   "Return all calendar event corresponding CAL-ID.
