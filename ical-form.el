@@ -866,6 +866,44 @@ Save `\\[ical-form-save]', \
 abort `\\[ical-form-kill]'."))
       (set-buffer-modified-p nil))))
 
+(defun ical-form--widget-group-value-create (widget)
+  "Create function for groups.
+This simply applies the `cursor-intangible' function to indent
+characters."
+  (let ((args (widget-get widget :args))
+	(value (widget-get widget :value))
+	arg answer children)
+    (while args
+      (setq arg (car args)
+	    args (cdr args)
+	    answer (widget-match-inline arg value)
+	    value (cdr answer))
+      (and (widget--should-indent-p)
+	   (widget-get widget :indent)
+           (insert
+            (ical-form--make-intangible
+             (make-string (widget-get widget :indent) ?\s))))
+      (push (cond ((null answer)
+		   (widget-create-child widget arg))
+                  ((widget-inline-p arg t)
+		   (widget-create-child-value widget arg (car answer)))
+		  (t
+		   (widget-create-child-value widget arg (car (car answer)))))
+	    children))
+    (widget-put widget :children (nreverse children))))
+
+(defun ical-form--make-intangible (&rest args)
+  (let ((result ""))
+    (dotimes (i (length args) result)
+      (let ((txt (pop args)))
+        (when (eq (mod i 2) 0)
+          (add-text-properties 0 (length txt)
+                               '(cursor-intangible t
+                                                   rear-nonsticky t
+                                                   front-sticky t)
+                               txt))
+        (setq result (concat result txt))))))
+
 (defun ical-form--create-form (event)
   "Create form in current buffer corresponding to EVENT."
   (let* ((cal-id (ical-form-event-get event 'X-EMACS-CALID))
@@ -876,8 +914,8 @@ abort `\\[ical-form-kill]'."))
                        (car-safe ical-form--default-timezone)))
          (all-day-p (alist-get 'ALL-DAY-P (cdr dt-start)))
          (end (ical-form-event-get event 'DTEND))
-         (NL (propertize "\n" 'cursor-intangible t))
-         (SPC (propertize " " 'cursor-intangible t))
+         (NL (ical-form--make-intangible "\n"))
+         (SPC (ical-form--make-intangible " "))
          (NL2 (concat NL NL)))
     (widget-insert NL2)
 
@@ -903,12 +941,10 @@ abort `\\[ical-form-kill]'."))
        #'widget-create
        'menu-choice
        :field-key 'calendar-id
-       :format (concat
-                ;; TODO: value not correctly propertized
-                (propertize "Calendar: " 'face 'ical-form-field-names
-                            'cursor-intangible t)
+       :format (ical-form--make-intangible
+                (propertize "Calendar: " 'face 'ical-form-field-names)
                 "%[%v%]"
-                NL2)
+                "\n\n")
        :value (or cal-id
                   (plist-get
                    (cl-find-if
@@ -933,19 +969,17 @@ abort `\\[ical-form-kill]'."))
     (widget-create 'editable-field
                    :field-key 'end-date
                    :keymap ical-form-field-map
-                   :format (concat
-                            (propertize "  --    "  'cursor-intangible t)
+                   :format (ical-form--make-intangible
+                            "  --    "
                             "%v"
-                            (propertize "   "  'cursor-intangible t))
+                            "   ")
                    :size 10
                    (format-time-string "%F" end))
     (widget-create 'editable-field
                    :field-key 'start-time
                    :keymap ical-form-field-map
-                   :format (concat
-                            (propertize " " 'cursor-intangible t)
-                            "%v"
-                            (propertize " -- " 'cursor-intangible t))
+                   :format (ical-form--make-intangible
+                            " " "%v" " -- ")
                    :size 6
                    (ical-form--format-time
                     (car dt-start)
@@ -956,7 +990,7 @@ abort `\\[ical-form-kill]'."))
                    :format (concat
                             SPC
                             "%v"
-                            (propertize "   " 'cursor-intangible t))
+                            (ical-form--make-intangible "   "))
                    :size 6
                    (ical-form--format-time end timezone))
     (widget-create 'checkbox
@@ -964,7 +998,7 @@ abort `\\[ical-form-kill]'."))
                    :format (concat
                             SPC
                             "%[%v%]"
-                            (propertize " All day" 'cursor-intangible t)
+                            (ical-form--make-intangible " All day")
                             NL2)
                    :notify #'ical-form--hs-action
                    :hs (ical-form--checkbox-hs
@@ -985,12 +1019,10 @@ abort `\\[ical-form-kill]'."))
        'menu-choice
        :field-key 'timezone
        :notify #'ical-form--timezone-widget-notify
-       :format (concat
+       :format (ical-form--make-intangible
                 (propertize "Timezone: "
-                            'face 'ical-form-field-names
-                            'cursor-intangible t)
-                "%[%v%]"
-                NL2)
+                            'face 'ical-form-field-names)
+                "%[%v%]" "\n\n")
        :value timezone
        :old-value timezone
        options))
@@ -1002,14 +1034,13 @@ abort `\\[ical-form-kill]'."))
      :format (concat "%v" NL2)
      :value (or
              (ical-form-event-get event 'X-EMACS-AVAILABILITY) 'busy)
-     `(item :format ,(propertize "Tentative "
-                                 'cursor-intangible t)
+     `(item :format ,(ical-form--make-intangible "Tentative")
             :value tentative)
-     `(item :format ,(propertize "Free " 'cursor-intangible t)
+     `(item :format ,(ical-form--make-intangible "Free")
             :value free)
-     `(item :format ,(propertize "Busy " 'cursor-intangible t)
+     `(item :format ,(ical-form--make-intangible "Busy")
             :value busy)
-     `(item :format ,(propertize "Unavailable " 'cursor-intangible t)
+     `(item :format ,(ical-form--make-intangible "Unavailable")
             :value unavailable))
 
     (widget-create
@@ -1017,10 +1048,9 @@ abort `\\[ical-form-kill]'."))
      :field-key 'location
      :keymap ical-form-field-map
      :format
-     (concat
-      (propertize "Location: " 'face 'ical-form-field-names
-                  'cursor-intangible t)
-      "%v" NL)
+     (ical-form--make-intangible
+      (propertize "Location: " 'face 'ical-form-field-names)
+      "%v" "\n")
      (or (ical-form-event-get event 'LOCATION) ""))
 
     (let* ((recur (cdr (ical-form-event-get event 'RRULE t)))
@@ -1030,10 +1060,8 @@ abort `\\[ical-form-kill]'."))
                :field-key recurrence-interval
                :value-to-external ical-form--parse-integer-field
                :keymap ical-form-field-map
-               :format ,(concat
-                         (propertize "every " 'cursor-intangible t)
-                         "%v"
-                         SPC)
+               :format ,(ical-form--make-intangible
+                         "every " "%v" " ")
                :size 5
                ,(or (when-let (interval
                                (alist-get 'INTERVAL recur))
@@ -1054,21 +1082,21 @@ abort `\\[ical-form-kill]'."))
                :notify ical-form--hs-action
                :value ,(or (alist-get 'FREQ recur)
                            'weekly)
-               (item :format ,(propertize "Day" 'cursor-intangible t)
+               (item :format ,(ical-form--make-intangible "Day")
                      :value daily)
-               (item :format ,(propertize "Week" 'cursor-intangible t)
+               (item :format ,(ical-form--make-intangible "Week")
                      :value weekly)
-               (item :format ,(propertize "Month" 'cursor-intangible t)
+               (item :format ,(ical-form--make-intangible "Month")
                      :value monthly)
-               (item :format ,(propertize "Year" 'cursor-intangible t)
+               (item :format ,(ical-form--make-intangible "Year")
                      :value yearly))
 
              (append
               `(checklist
                 :field-key recurrence-byday
-                :indent 3  ;; TODO: How to make intangible?
-                :format ,(concat (propertize "on " 'cursor-intangible t)
-                                 "%v" NL)
+                :indent 3
+                :entry-format ,(concat "%b" SPC "%v")
+                :format ,(ical-form--make-intangible "on " "%v" "\n")
                 :value ,(cl-loop for day in (alist-get 'BYDAY recur)
                                  collect (car day)))
               (cl-loop
@@ -1077,17 +1105,19 @@ abort `\\[ical-form-kill]'."))
                             "SATURDAY")
                for w in lst
                collect `(item :format
-                              ,(concat
-                                (propertize (capitalize (substring w 0 3))
-                                            'cursor-intangible t)
-                                SPC)
+                              ,(ical-form--make-intangible
+                                (concat (capitalize (substring w 0 3))
+                                        " "))
                               ,(intern (substring w 0 2)))))
 
              `(editable-field
                :field-key recurrence-bymonthday
                :value-to-external ical-form--parse-integer-list-field
                :keymap ical-form-field-map
-               :format "on days of month [-31 to 31]: %v\n"
+               :format ,(ical-form--make-intangible
+                         "on days of month [-31 to 31]: "
+                         "%v"
+                         "\n")
                :size 10
                ,(or (when-let (mdays (alist-get 'BYMONTHDAY recur))
                       (string-join (cl-loop for i in mdays
@@ -1097,7 +1127,7 @@ abort `\\[ical-form-kill]'."))
              (append
               `(checklist
                 :field-key recurrence-bymonth
-                :format "on %v\n"
+                :format ,(ical-form--make-intangible "on " "%v" "\n")
                 :value ,(alist-get 'BYMONTH recur))
               (cl-loop
                with lst = '("JAN" "FEB" "MAR" "APR"
@@ -1105,7 +1135,8 @@ abort `\\[ical-form-kill]'."))
                             "SEP" "OCT" "NOV" "DEC")
                for w in lst
                for idx from 1
-               collect `(item :format "%t "
+               collect `(item :format
+                              ,(ical-form--make-intangible "%t ")
                               :tag ,w
                               ,idx)))
              `(editable-field
@@ -1140,9 +1171,9 @@ abort `\\[ical-form-kill]'."))
                :notify ical-form--hs-action
                :value ,(or (and (alist-get 'UNTIL recur) 'on)
                            (and (alist-get 'COUNT recur) 'after))
-               (item :format ,(propertize "Until" 'cursor-intangible t)
+               (item :format ,(ical-form--make-intangible "Until")
                      :value on)
-               (item :format ,(propertize "After" 'cursor-intangible t)
+               (item :format ,(ical-form--make-intangible "After")
                      :value after))
 
              `(editable-field
@@ -1162,7 +1193,7 @@ abort `\\[ical-form-kill]'."))
                :value-to-external ical-form--parse-integer-field
                :keymap ical-form-field-map
                :format ,(concat SPC "%v"
-                                (propertize " occurrences" 'cursor-intangible t))
+                                (ical-form--make-intangible " occurrences"))
                :size 5
                ,(or (when-let (occurrence-count
                                (alist-get 'COUNT recur))
@@ -1184,16 +1215,18 @@ abort `\\[ical-form-kill]'."))
        'checkbox
        :field-key 'recurrence-p
        :format (concat "%[%v%]"
-                       (propertize " Repeat "
-                                   'cursor-intangible t))
+                       (ical-form--make-intangible " Repeat "))
        :notify #'ical-form--hs-action
        :hs (ical-form--checkbox-hs 'recurrence)
        recur)
 
       (apply #'widget-create
              'group
-             :format (concat (propertize ":" 'display "") "%v")
+             :format (ical-form--make-intangible
+                      (propertize ":" 'display "")
+                      "%v")
              :field-key 'recurrence
+             :value-create #'ical-form--widget-group-value-create
              :value-to-external
              (lambda (widget _value)
                (unless (widget-get widget :hidden)
@@ -1249,20 +1282,18 @@ abort `\\[ical-form-kill]'."))
     (when-let (stat (ical-form-event-get event 'STATUS))
       (unless (eq stat 'none)
         (widget-insert
-         (propertize
+         (ical-form--make-intangible
           (concat (propertize "Status: "
                               'face 'ical-form-field-names)
                   (symbol-name stat)
-                  NL2)
-          'cursor-intangible t))))
+                  NL2)))))
 
     (when-let (org (ical-form-event-get event 'ORGANIZER))
       (widget-insert
-       (propertize
+       (ical-form--make-intangible
         (concat (propertize "Organizer: "
                             'face 'ical-form-field-names)
-                org)
-        'cursor-intangible t)
+                org))
        NL2))
 
 
@@ -1271,9 +1302,9 @@ abort `\\[ical-form-kill]'."))
      :field-key 'url
      :keymap ical-form-field-map
      :format
-     (concat
-      (propertize "URL: " 'face 'ical-form-field-names 'cursor-intangible t)
-      "%v" NL2)
+     (ical-form--make-intangible
+      (propertize "URL: " 'face 'ical-form-field-names)
+      "%v" "\n\n")
      (or (ical-form-event-get event 'URL) ""))
 
     (widget-create
@@ -1284,6 +1315,10 @@ abort `\\[ical-form-kill]'."))
      :value-face 'ical-form-notes-field
      (ical-form--html-content-maybe
       (or (ical-form-event-get  event 'DESCRIPTION) "")))
+
+    (insert (propertize "\n" 'cursor-intangible t
+                        'rear-nonsticky nil
+                        'front-sticky t))
 
     (widget-setup)
 
@@ -1302,12 +1337,13 @@ abort `\\[ical-form-kill]'."))
                do
                (cl-loop for child in (widget-get wid :children)
                         do (widget-put child :tab-order -1))))
-    (cursor-next-tangible-mode)
+    (cursor-intangible-mode)
+
     (goto-char (point-min))
     (widget-move 1) ;; Go to next widget (should be title)
     (widget-end-of-line) ;; Go to end of line
 
-    (add-hook 'post-command-hook #'ical-form--avoid-point-max nil t)
+    ;; (add-hook 'post-command-hook #'ical-form--avoid-point-max nil t)
 
     (when (ical-form-event-get event 'X-EMACS-READ-ONLY)
       (ical-form--make-inactive))))
