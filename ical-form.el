@@ -322,9 +322,7 @@ If DUPLICATE is non-nil, save the event as a new one."
                (if all-day
                    "23:59:59"
                  (ical-form--value 'end-time widgets))
-               (if all-day
-                   (ical-form--value 'end-date widgets)
-                 (ical-form--value 'start-date widgets))))
+               (ical-form--value 'end-date widgets)))
          (old-id (unless duplicate
                    (ical-form-event-get old-data 'UID)))
          (new-data
@@ -429,104 +427,83 @@ WIDGET defaults to the one at `(point)' if it is for a date.
 Otherwise, the widgets for start time/date are set, unless prefix
 is given or the widget at (point) is for end time/date, in which
 case the end time/date is set."
-  (interactive (list
-                (let ((wid (widget-at)))
-                  (if (and wid
-                           (eq (widget-get wid :value-to-external)
-                               #'ical-form--parse-date-field))
-                      wid
-                    (if (or current-prefix-arg
-                            (when-let ((wid (widget-at (point)))
-                                       (key (widget-get wid :field-key)))
-                              (member key '(end-time end-date))))
-                        'end-time
-                      'start-time)))))
+  (interactive (list (widget-at)))
+  (let* ((widgets (ical-form--get-widgets))
+         (for-end-date (or current-prefix-arg
+                           (and widget
+                                (member (widget-get widget :field-key)
+                                        '(end-time end-date)))))
+         (ktime (if for-end-date 'end-time 'start-time))
+         (kdate (if for-end-date 'end-date 'start-date)))
+    (if (widget-get (ical-form--find-widget ktime widgets) :inactive)
+        (ical-form-read-only)
+      (let* ((all-day-p  (ical-form--value 'all-day widgets))
+             ;; Define these two to make sure they are bound for
+             ;; `org-read-date'
+             org-time-was-given
+             org-end-time-was-given
+             (new-time (org-read-date
+                        (not all-day-p)
+                        t
+                        nil
+                        (if for-end-date "End" "Start")
+                        (ical-form--parse-datetime
+                         (if all-day-p
+                             (if for-end-date "23:59" "00:00")
+                           (ical-form--value ktime widgets))
+                         (ical-form--value kdate widgets)))))
+        (save-excursion
+          (widget-value-set (ical-form--find-widget kdate widgets)
+                            (format-time-string "%F" new-time))
+          (when (and (not all-day-p)
+                     org-time-was-given)
+            (widget-value-set (ical-form--find-widget ktime widgets)
+                              (ical-form--format-time new-time)))
 
-  (let ((widgets (ical-form--get-widgets))
-        (for-end-date (eq widget 'end-time)))
-    (if (widgetp widget)
-        (let* ((old-time
-                (ical-form--parse-datetime
-                 "00:00"
-                 (or (widget-value widget)
-                     (ical-form--value
-                      'start-date widgets)))))
-          (widget-value-set widget
-                            (org-read-date
-                             nil nil nil
-                             "Date"
-                             old-time)))
-      (if (widget-get
-           (ical-form--find-widget 'start-time widgets)
-           :inactive)
-          (ical-form-read-only)
-        (let* ((start-time-wid (ical-form--find-widget 'start-time
-                                                            widgets))
-               (start-date-wid (ical-form--find-widget 'start-date
-                                                            widgets))
-               (end-time-wid (ical-form--find-widget 'end-time widgets))
-               (end-date-wid (ical-form--find-widget 'end-date widgets))
-               (all-day-wid (ical-form--find-widget 'all-day widgets))
-               (all-day-p  (widget-value all-day-wid))
-               (start-time
-                (ical-form--parse-datetime
-                 (if all-day-p
-                     "00:00"
-                   (widget-value start-time-wid))
-                 (widget-value start-date-wid)))
-               (end-time
-                (ical-form--parse-datetime
-                 (if all-day-p
-                     "23:59"
-                   (widget-value end-time-wid))
-                 (widget-value end-date-wid)))
-               ;; Define these two to make sure they are bound for
-               ;; `org-read-date'
-               org-time-was-given
-               org-end-time-was-given
-               (new-time (org-read-date
-                          (not (widget-value all-day-wid))
-                          t
-                          nil
-                          (if for-end-date
-                              "End"
-                            "Start")
-                          (if for-end-date
-                              end-time
-                            start-time))))
-          (save-excursion
-            (widget-value-set (if (and for-end-date all-day-p)
-                                  end-date-wid
-                                start-date-wid)
-                              (format-time-string "%F" new-time))
+          (when (and (not all-day-p)
+                     (not for-end-date)
+                     org-time-was-given
+                     org-end-time-was-given)
+            (widget-value-set (ical-form--find-widget 'end-time widgets)
+                              org-end-time-was-given)))))))
 
-            (when (not for-end-date)
-              ;; Shift end date as well
-              (widget-value-set
-               end-date-wid
-               (format-time-string "%F"
-                                   (time-add new-time
-                                             (* (- (time-to-days end-time)
-                                                   (time-to-days start-time))
-                                                24 60 60)))))
-
-            (when (and (not all-day-p) org-time-was-given)
-              ;; Update time as well
-              (if (or (not for-end-date) org-end-time-was-given)
-                  (progn
-                    (widget-value-set start-time-wid
-                                      (ical-form--format-time new-time))
-                    (widget-value-set
-                     end-time-wid
-                     (or org-end-time-was-given
-                         (ical-form--format-time
-                          (time-add new-time
-                                    (time-subtract end-time
-                                                   start-time))))))
-                ;; for-end-date and range not given
-                (widget-value-set
-                 end-time-wid
-                 (ical-form--format-time new-time))))))))))
+(defun ical-form--update-end-time (&rest _)
+  "Update end time and date to maintain previous duration.
+Ignores arguments."
+  (let* ((widgets (ical-form--get-widgets))
+         (start-time-wid (ical-form--find-widget 'start-time widgets))
+         (start-date-wid (ical-form--find-widget 'start-date widgets))
+         (end-time-wid (ical-form--find-widget 'end-time widgets))
+         (end-date-wid (ical-form--find-widget 'end-date widgets))
+         (all-day-p  (ical-form--value 'all-day widgets))
+         (new-start-time
+          (ignore-errors (ical-form--parse-datetime
+                          (if all-day-p
+                              "00:00"
+                            (widget-value start-time-wid))
+                          (widget-value start-date-wid))))
+         (old-start-time (widget-get start-time-wid :prev-time))
+         (end-time (ignore-errors
+                     (ical-form--parse-datetime
+                      (if all-day-p
+                          "23:59"
+                        (widget-value end-time-wid))
+                      (widget-value end-date-wid))))
+         new-end-time)
+    (when (and end-time new-start-time)
+      (setq new-end-time (time-add new-start-time
+                                   (time-subtract
+                                    end-time
+                                    old-start-time)))
+      (save-excursion
+        (widget-value-set
+         end-date-wid
+         (format-time-string "%F" new-end-time))
+        (widget-value-set
+         end-time-wid
+         (ical-form--format-time new-end-time))
+        (widget-put start-time-wid :prev-time
+                    new-start-time)))))
 
 (defun ical-form-open (event calendars timezones &optional update-fn)
   "Open a buffer to display the details of EVENT.
@@ -961,29 +938,32 @@ characters."
     (widget-create 'editable-field
                    :field-key 'start-date
                    :keymap ical-form-field-map
+                   :notify #'ical-form--update-end-time
                    :format (concat SPC "%v" SPC)
                    :size 10
                    (and event
                         (format-time-string "%F" (car dt-start))))
 
     (widget-create 'editable-field
-                   :field-key 'end-date
-                   :keymap ical-form-field-map
-                   :format (ical-form--make-intangible
-                            "  --    "
-                            "%v"
-                            "   ")
-                   :size 10
-                   (format-time-string "%F" end))
-    (widget-create 'editable-field
                    :field-key 'start-time
                    :keymap ical-form-field-map
                    :format (ical-form--make-intangible
-                            " " "%v" " -- ")
+                            " " "%v" " ")
+                   :notify #'ical-form--update-end-time
+                   :prev-time (car dt-start)
                    :size 6
                    (ical-form--format-time
                     (car dt-start)
                     timezone))
+
+    (widget-create 'editable-field
+                   :field-key 'end-date
+                   :keymap ical-form-field-map
+                   :format (ical-form--make-intangible
+                            "  --   " "%v" " ")
+                   :size 10
+                   (format-time-string "%F" end))
+
     (widget-create 'editable-field
                    :field-key 'end-time
                    :keymap ical-form-field-map
@@ -993,6 +973,7 @@ characters."
                             (ical-form--make-intangible "   "))
                    :size 6
                    (ical-form--format-time end timezone))
+
     (widget-create 'checkbox
                    :field-key 'all-day
                    :format (concat
@@ -1002,7 +983,7 @@ characters."
                             NL2)
                    :notify #'ical-form--hs-action
                    :hs (ical-form--checkbox-hs
-                        'end-date
+                        nil
                         '(start-time end-time timezone))
                    all-day-p)
     (let* ((options (mapcar
