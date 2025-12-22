@@ -109,6 +109,7 @@ were modified, relative to the old values."
 (defvar-local ical-form--timezones nil)
 (defvar-local ical-form--calendars nil)
 (defvar-local ical-form--default-timezone nil)
+(defvar-local ical-form--inhibit-auto-time-update nil)
 
 
 ;; These need to be dynamically bound when using `org-pick-date'
@@ -453,12 +454,16 @@ case the end time/date is set."
                            (ical-form--value ktime widgets))
                          (ical-form--value kdate widgets)))))
         (save-excursion
-          (widget-value-set (ical-form--find-widget kdate widgets)
-                            (format-time-string "%F" new-time))
-          (when (and (not all-day-p)
-                     org-time-was-given)
-            (widget-value-set (ical-form--find-widget ktime widgets)
-                              (ical-form--format-time new-time)))
+          (let ((ical-form--inhibit-auto-time-update t))
+            (widget-value-set (ical-form--find-widget kdate widgets)
+                              (format-time-string "%F" new-time))
+            (when (and (not all-day-p)
+                       org-time-was-given)
+              (widget-value-set (ical-form--find-widget ktime widgets)
+                                (ical-form--format-time new-time))))
+
+          (unless for-end-date
+            (ical-form--update-end-time))
 
           (when (and (not all-day-p)
                      (not for-end-date)
@@ -470,40 +475,43 @@ case the end time/date is set."
 (defun ical-form--update-end-time (&rest _)
   "Update end time and date to maintain previous duration.
 Ignores arguments."
-  (let* ((widgets (ical-form--get-widgets))
-         (start-time-wid (ical-form--find-widget 'start-time widgets))
-         (start-date-wid (ical-form--find-widget 'start-date widgets))
-         (end-time-wid (ical-form--find-widget 'end-time widgets))
-         (end-date-wid (ical-form--find-widget 'end-date widgets))
-         (all-day-p  (ical-form--value 'all-day widgets))
-         (new-start-time
-          (ignore-errors (ical-form--parse-datetime
-                          (if all-day-p
-                              "00:00"
-                            (widget-value start-time-wid))
-                          (widget-value start-date-wid))))
-         (old-start-time (widget-get start-time-wid :prev-time))
-         (end-time (ignore-errors
-                     (ical-form--parse-datetime
-                      (if all-day-p
-                          "23:59"
-                        (widget-value end-time-wid))
-                      (widget-value end-date-wid))))
-         new-end-time)
-    (when (and end-time new-start-time)
-      (setq new-end-time (time-add new-start-time
-                                   (time-subtract
-                                    end-time
-                                    old-start-time)))
-      (save-excursion
-        (widget-value-set
-         end-date-wid
-         (format-time-string "%F" new-end-time))
-        (widget-value-set
-         end-time-wid
-         (ical-form--format-time new-end-time))
-        (widget-put start-time-wid :prev-time
-                    new-start-time)))))
+  (unless ical-form--inhibit-auto-time-update
+    (let* ((widgets (ical-form--get-widgets))
+           (start-time-wid (ical-form--find-widget 'start-time widgets))
+           (start-date-wid (ical-form--find-widget 'start-date widgets))
+           (end-time-wid (ical-form--find-widget 'end-time widgets))
+           (end-date-wid (ical-form--find-widget 'end-date widgets))
+           (all-day-p  (ical-form--value 'all-day widgets))
+           (tz (ical-form--value 'timezone widgets))
+           (new-start-time
+            (ignore-errors (ical-form--parse-datetime
+                            (if all-day-p
+                                "00:00"
+                              (widget-value start-time-wid))
+                            (widget-value start-date-wid)
+                            tz)))
+           (old-start-time (widget-get start-time-wid :prev-time))
+           (end-time (ignore-errors
+                       (ical-form--parse-datetime
+                        (if all-day-p
+                            "23:59"
+                          (widget-value end-time-wid))
+                        (widget-value end-date-wid)
+                        tz)))
+           new-end-time)
+      (when (and end-time new-start-time)
+        (setq new-end-time (time-add new-start-time
+                                     (time-subtract
+                                      end-time
+                                      old-start-time)))
+        (save-excursion
+          (widget-value-set
+           end-date-wid
+           (format-time-string "%F" new-end-time tz))
+          (widget-value-set
+           end-time-wid
+           (ical-form--format-time new-end-time tz))
+          (widget-put start-time-wid :prev-time new-start-time))))))
 
 (defun ical-form-open (event calendars timezones &optional update-fn)
   "Open a buffer to display the details of EVENT.
@@ -715,23 +723,24 @@ function)."
   (let ((widgets (ical-form--get-widgets)))
     (unless (ical-form--value 'all-day widgets)
       (let* ((old-tz (widget-get widget :old-value))
-             (tz (widget-value widget)))
+             (tz (widget-value widget))
+             (ical-form--inhibit-auto-time-update t))
         (save-excursion
-          (cl-loop for (date-wid . time-wid) in '((start-date . start-time)
-                                                  (end-date . end-time))
-                   for time-widget = (ical-form--find-widget
-                                      time-wid widgets)
-                   for date-widget = (ical-form--find-widget
-                                      date-wid widgets)
+          ;; Change only start time, the end time is changed automatically
+          ;; `ical-form--update-end-time'
+          ;; Start with end-time
+          (cl-loop for (date-wid . time-wid) in '((end-date . end-time)
+                                                  (start-date . start-time))
+                   for time-widget = (ical-form--find-widget time-wid widgets)
+                   for date-widget = (ical-form--find-widget date-wid widgets)
+                   for old-time-utc = (ical-form--parse-datetime
+                                       (widget-value time-widget)
+                                       (widget-value date-widget)
+                                       old-tz)
                    do
                    (widget-value-set
                     time-widget
-                    (ical-form--format-time
-                     (ical-form--parse-datetime
-                      (widget-value time-widget)
-                      (widget-value date-widget)
-                      old-tz)
-                     tz)))
+                    (ical-form--format-time old-time-utc tz)))
           (widget-put widget :old-value tz))))))
 
 (defun ical-form--checkbox-hs (t-widgets &optional nil-widgets)
@@ -774,8 +783,7 @@ checkbox."
                              (alist-get wid-id wid-all))))
              finally
              (cl-loop for (wid-id . vis) in wid-all
-                      for wid = (ical-form--find-widget wid-id
-                                                             widgets)
+                      for wid = (ical-form--find-widget wid-id widgets)
                       when wid
                       do
                       (ical-form--show-hide-widget

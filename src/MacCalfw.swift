@@ -146,7 +146,7 @@ extension Date : iCalCastable {
 
     // More custom implementation for Emacs casting
     func toiCal_list(_ all_day : Bool = false,
-                _ timeZoneId : String? = nil) -> [EmacsCastable?] {
+                     _ timeZoneId : String? = nil) -> [EmacsCastable?] {
         var params : [EmacsCastable?]? = nil
         let dateFormatter = DateFormatter()
         dateFormatter.locale = Locale(identifier: "en_US_POSIX")
@@ -155,13 +155,14 @@ extension Date : iCalCastable {
             dateFormatter.dateFormat = "yyyyMMdd"
         }
         else {
-            if let timeZoneId {
-                params = [EmacsQuote("TZID"), timeZoneId]
-            }
+            params = [EmacsQuote("TZID"), timeZoneId ?? NSTimeZone.default.identifier]
+            // if let timeZoneId {
+            //     params = [EmacsQuote("TZID"), timeZoneId]
+            // }
             dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
-            if timeZoneId == nil{
-                dateFormatter.dateFormat += "'Z'"
-            }
+            // if timeZoneId == nil {
+            //     dateFormatter.dateFormat += "'Z'"
+            // }
         }
         return [params, dateFormatter.string(from: self)]
     }
