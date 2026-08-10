@@ -820,6 +820,25 @@ checkbox."
                       (ical-form--show-hide-widget
                        wid (cl-some #'identity vis))))))
 
+(defvar ical-form--notes-link-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'shr-browse-url)
+    (define-key map [mouse-2] #'shr-browse-url)
+    map)
+  "Keymap for link text in a rendered HTML notes preview.
+Only activates the link (RET, mouse-2, and mouse-1 via the
+pre-existing `follow-link' property); unlike `shr-map' it doesn't
+also bind ordinary letters to shr commands, which would hijack
+keystrokes meant for the field itself -- see
+`ical-form--html-content-maybe'.")
+
+(defvar ical-form--notes-image-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'shr-browse-image)
+    (define-key map [mouse-2] #'shr-browse-image)
+    map)
+  "Like `ical-form--notes-link-map', for image-placeholder text.")
+
 (defun ical-form--collapse-whitespace (string)
   "Collapse runs of whitespace in STRING to a single space, trimmed.
 HTML treats runs of whitespace, including newlines, as
@@ -859,9 +878,21 @@ stays a plain editable field)."
         ;; field's `local-map', so left in place it hijacks ordinary
         ;; keystrokes typed into the field -- e.g. `a' silently becomes
         ;; `shr-show-alt-text' instead of reaching the field's read-only
-        ;; guard or self-insert. Strip it; the preview is inert text, not
-        ;; an interactive shr buffer.
-        (remove-text-properties 0 (length rendered) '(keymap nil) rendered)
+        ;; guard or self-insert. Swap it for a minimal keymap that only
+        ;; lets RET/mouse-2/mouse-1-click-follows-link activate the
+        ;; link/image URL, so following a link still works without
+        ;; shr-map's other bindings hijacking the rest of the field.
+        (let ((pos 0) (len (length rendered)))
+          (while (< pos len)
+            (let ((next (next-single-property-change pos 'keymap rendered len)))
+              (when (get-text-property pos 'keymap rendered)
+                (put-text-property
+                 pos next 'keymap
+                 (if (get-text-property pos 'shr-url rendered)
+                     ical-form--notes-link-map
+                   ical-form--notes-image-map)
+                 rendered))
+              (setq pos next))))
         (if (equal (ical-form--collapse-whitespace rendered)
                    (ical-form--collapse-whitespace content))
             (cons nil content)
