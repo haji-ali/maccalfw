@@ -156,19 +156,20 @@ environment variable, set to MODE here."
   (test-maccalfw--with-fake-mode "remove-ok"
     (should (eq t (maccalfw-remove-event "evt-1")))))
 
-;;; Combined-fetch caching (maccalfw--fetch-events-cached)
+;;; Combined-fetch caching (maccalfw--fetch-items-cached)
 ;;
 ;; calfw queries every configured calendar as a separate source, so
 ;; without this, N calendars means N maccalq subprocess calls per
-;; redraw. These mock maccalfw-fetch-events directly (not the CLI) to
-;; test the caching/splitting logic that sits above it.
+;; redraw. These mock maccalfw-fetch-events/maccalfw-fetch-reminders
+;; directly (not the CLI) to test the caching/splitting logic shared by
+;; both event and reminder calendars.
 
 (defun test-maccalfw--fake-event (cal-id uid)
   "A minimal ical-form-shaped event alist tagged with CAL-ID."
   `((UID nil ,uid) (X-EMACS-CALID nil ,cal-id)))
 
-(ert-deftest test-maccalfw-fetch-events-cached-dedupes-same-range ()
-  (let ((maccalfw--events-cache nil)
+(ert-deftest test-maccalfw-fetch-items-cached-dedupes-same-range ()
+  (let ((maccalfw--items-cache nil)
         (call-count 0))
     (cl-letf (((symbol-function 'maccalfw-fetch-events)
                (lambda (cal-ids &rest _)
@@ -176,72 +177,102 @@ environment variable, set to MODE here."
                  (mapcar (lambda (id) (test-maccalfw--fake-event id id)) cal-ids))))
       (let ((begin '(1 1 2026)) (end '(1 7 2026)))
         ;; Three "sources" querying the same range, as calfw does.
-        (maccalfw--fetch-events-cached '("a" "b" "c") begin end)
-        (maccalfw--fetch-events-cached '("a" "b" "c") begin end)
-        (maccalfw--fetch-events-cached '("a" "b" "c") begin end)
+        (maccalfw--fetch-items-cached 'event '("a" "b" "c") begin end)
+        (maccalfw--fetch-items-cached 'event '("a" "b" "c") begin end)
+        (maccalfw--fetch-items-cached 'event '("a" "b" "c") begin end)
         (should (= 1 call-count))))))
 
-(ert-deftest test-maccalfw-fetch-events-cached-splits-by-calendar ()
-  (let ((maccalfw--events-cache nil))
+(ert-deftest test-maccalfw-fetch-items-cached-splits-by-calendar ()
+  (let ((maccalfw--items-cache nil))
     (cl-letf (((symbol-function 'maccalfw-fetch-events)
                (lambda (cal-ids &rest _)
                  (mapcar (lambda (id) (test-maccalfw--fake-event id id)) cal-ids))))
-      (let ((by-cal (maccalfw--fetch-events-cached '("a" "b") '(1 1 2026) '(1 7 2026))))
+      (let ((by-cal (maccalfw--fetch-items-cached 'event '("a" "b") '(1 1 2026) '(1 7 2026))))
         (should (equal (list (test-maccalfw--fake-event "a" "a")) (gethash "a" by-cal)))
         (should (equal (list (test-maccalfw--fake-event "b" "b")) (gethash "b" by-cal)))
         (should (null (gethash "c" by-cal)))))))
 
-(ert-deftest test-maccalfw-fetch-events-cached-different-range-refetches ()
-  (let ((maccalfw--events-cache nil)
+(ert-deftest test-maccalfw-fetch-items-cached-different-range-refetches ()
+  (let ((maccalfw--items-cache nil)
         (call-count 0))
     (cl-letf (((symbol-function 'maccalfw-fetch-events)
                (lambda (&rest _) (setq call-count (1+ call-count)) nil)))
-      (maccalfw--fetch-events-cached '("a") '(1 1 2026) '(1 7 2026))
-      (maccalfw--fetch-events-cached '("a") '(1 8 2026) '(1 14 2026))
+      (maccalfw--fetch-items-cached 'event '("a") '(1 1 2026) '(1 7 2026))
+      (maccalfw--fetch-items-cached 'event '("a") '(1 8 2026) '(1 14 2026))
       (should (= 2 call-count)))))
 
-(ert-deftest test-maccalfw-fetch-events-cached-different-cal-ids-refetches ()
-  (let ((maccalfw--events-cache nil)
+(ert-deftest test-maccalfw-fetch-items-cached-different-cal-ids-refetches ()
+  (let ((maccalfw--items-cache nil)
         (call-count 0))
     (cl-letf (((symbol-function 'maccalfw-fetch-events)
                (lambda (&rest _) (setq call-count (1+ call-count)) nil)))
-      (maccalfw--fetch-events-cached '("a") '(1 1 2026) '(1 7 2026))
-      (maccalfw--fetch-events-cached '("a" "b") '(1 1 2026) '(1 7 2026))
+      (maccalfw--fetch-items-cached 'event '("a") '(1 1 2026) '(1 7 2026))
+      (maccalfw--fetch-items-cached 'event '("a" "b") '(1 1 2026) '(1 7 2026))
       (should (= 2 call-count)))))
 
-(ert-deftest test-maccalfw-fetch-events-cached-ttl-expires ()
-  (let ((maccalfw--events-cache nil)
+(ert-deftest test-maccalfw-fetch-items-cached-ttl-expires ()
+  (let ((maccalfw--items-cache nil)
         (call-count 0))
     (cl-letf (((symbol-function 'maccalfw-fetch-events)
                (lambda (&rest _) (setq call-count (1+ call-count)) nil)))
-      (maccalfw--fetch-events-cached '("a") '(1 1 2026) '(1 7 2026))
+      (maccalfw--fetch-items-cached 'event '("a") '(1 1 2026) '(1 7 2026))
       ;; Simulate the cache entry having aged past the TTL.
-      (setf (nth 1 maccalfw--events-cache)
-            (- (float-time) maccalfw--events-cache-ttl 1))
-      (maccalfw--fetch-events-cached '("a") '(1 1 2026) '(1 7 2026))
+      (setf (nth 1 maccalfw--items-cache)
+            (- (float-time) maccalfw--items-cache-ttl 1))
+      (maccalfw--fetch-items-cached 'event '("a") '(1 1 2026) '(1 7 2026))
       (should (= 2 call-count)))))
 
-(ert-deftest test-maccalfw-invalidate-events-cache-forces-refetch ()
-  (let ((maccalfw--events-cache nil)
+(ert-deftest test-maccalfw-invalidate-items-cache-forces-refetch ()
+  (let ((maccalfw--items-cache nil)
         (call-count 0))
     (cl-letf (((symbol-function 'maccalfw-fetch-events)
                (lambda (&rest _) (setq call-count (1+ call-count)) nil)))
-      (maccalfw--fetch-events-cached '("a") '(1 1 2026) '(1 7 2026))
-      (maccalfw--invalidate-events-cache)
-      (maccalfw--fetch-events-cached '("a") '(1 1 2026) '(1 7 2026))
+      (maccalfw--fetch-items-cached 'event '("a") '(1 1 2026) '(1 7 2026))
+      (maccalfw--invalidate-items-cache)
+      (maccalfw--fetch-items-cached 'event '("a") '(1 1 2026) '(1 7 2026))
       (should (= 2 call-count)))))
 
 (ert-deftest test-maccalfw-remove-event-invalidates-cache ()
   (test-maccalfw--with-fake-mode "remove-ok"
-    (setq maccalfw--events-cache (list "sentinel" (float-time) (make-hash-table)))
+    (setq maccalfw--items-cache (list "sentinel" (float-time) (make-hash-table)))
     (maccalfw-remove-event "evt-1")
-    (should (null maccalfw--events-cache))))
+    (should (null maccalfw--items-cache))))
 
 (ert-deftest test-maccalfw-update-event-invalidates-cache ()
   (test-maccalfw--with-fake-mode "remove-ok"
-    (setq maccalfw--events-cache (list "sentinel" (float-time) (make-hash-table)))
+    (setq maccalfw--items-cache (list "sentinel" (float-time) (make-hash-table)))
     (maccalfw-update-event nil '((SUMMARY nil "x")))
-    (should (null maccalfw--events-cache))))
+    (should (null maccalfw--items-cache))))
+
+;; Reminders share the same cache as events, keyed apart by `type', so
+;; the two never collide -- and unlike events, a reminders fetch isn't
+;; date-bounded server-side, so its cache key always uses nil for
+;; begin/end regardless of the visible range (see
+;; `maccalfw--fetch-items-cached'), which is what lets it stay a cache
+;; hit while paging between weeks.
+
+(ert-deftest test-maccalfw-fetch-items-cached-reminder-type-distinct-from-event ()
+  (let ((maccalfw--items-cache nil)
+        (event-calls 0) (reminder-calls 0))
+    (cl-letf (((symbol-function 'maccalfw-fetch-events)
+               (lambda (&rest _) (setq event-calls (1+ event-calls)) nil))
+              ((symbol-function 'maccalfw-fetch-reminders)
+               (lambda (&rest _) (setq reminder-calls (1+ reminder-calls)) nil)))
+      (maccalfw--fetch-items-cached 'event '("a") '(1 1 2026) '(1 7 2026))
+      (maccalfw--fetch-items-cached 'reminder '("a") '(1 1 2026) '(1 7 2026))
+      (should (= 1 event-calls))
+      (should (= 1 reminder-calls)))))
+
+(ert-deftest test-maccalfw-get-calendar-items-reminders-stay-cached-across-ranges ()
+  (let ((maccalfw--items-cache nil)
+        (call-count 0))
+    (cl-letf (((symbol-function 'maccalfw-fetch-reminders)
+               (lambda (&rest _)
+                 (setq call-count (1+ call-count))
+                 nil)))
+      (maccalfw--get-calendar-items 'reminder '("a") "a" '(1 1 2026) '(1 7 2026))
+      (maccalfw--get-calendar-items 'reminder '("a") "a" '(2 1 2026) '(2 7 2026))
+      (should (= 1 call-count)))))
 
 (provide 'test)
 ;;; test.el ends here

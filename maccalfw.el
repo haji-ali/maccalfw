@@ -177,10 +177,11 @@ being kept as strings."
 
 (defun maccalfw-get-calendars (&optional type)
   "Return Mac calendars as plists (:id :title :color :editable :default).
-TYPE is \"event\" (the default), \"reminder\", or \"all\"."
+TYPE is `event' (the default), `reminder', or `all'."
   (mapcar (lambda (triples)
             (maccalfw--cli-triples-to-plist triples '(:editable :default)))
-          (maccalfw--cli-call "calendars" (list :type (or type "event")))))
+          (maccalfw--cli-call
+           "calendars" (list :type (symbol-name (or type 'event))))))
 
 (defun maccalfw-timezones ()
   "Return system timezones as an alist of (ID . PLIST).
@@ -209,6 +210,20 @@ string, or a list of calendar IDs."
                         ((stringp calendar-id) (list calendar-id))
                         (t calendar-id)))))
 
+(defun maccalfw-fetch-reminders (calendar-id &optional include-completed)
+  "Return reminders (VTODOs) from CALENDAR-ID.
+CALENDAR-ID may be nil (all reminder calendars), a single calendar ID
+string, or a list of calendar IDs.  Unlike `maccalfw-fetch-events',
+this isn't bounded by a date range -- reminders may have no due date
+at all -- so it returns every reminder in scope.  Completed reminders
+are omitted unless INCLUDE-COMPLETED is non-nil."
+  (maccalfw--cli-call
+   "reminders"
+   (list :calendar (cond ((null calendar-id) nil)
+                        ((stringp calendar-id) (list calendar-id))
+                        (t calendar-id))
+         :include-completed (and include-completed t))))
+
 (defun maccalfw-update-event (id changed-data &optional start future)
   "Update or create an event, returning the saved event's data.
 ID is the event identifier, or nil to create a new event.
@@ -222,7 +237,7 @@ ID. If FUTURE is non-nil, all future occurrences are updated."
              :start (and start (maccalfw--iso8601 start))
              :future (and future t))
        (prin1-to-string changed-data))
-    (maccalfw--invalidate-events-cache)))
+    (maccalfw--invalidate-items-cache)))
 
 (defun maccalfw-remove-event (id &optional start future)
   "Remove event ID, returning t on success.
@@ -233,7 +248,7 @@ FUTURE is non-nil, all future occurrences are removed."
    (list :id id
          :start (and start (maccalfw--iso8601 start))
          :future (and future t)))
-  (maccalfw--invalidate-events-cache)
+  (maccalfw--invalidate-items-cache)
   t)
 
 (defun maccalfw--decode-date (time)
@@ -287,10 +302,44 @@ The event is returned `maccalfw-fetch-events'."
                           :data        event))))
     (apply #'make-calfw-event args)))
 
-(defun maccalfw--convert-to-calfw (events-list)
-  "Convert an EVENTS-LIST to calfw events."
-  (cl-loop for e in events-list
-           for event = (maccalfw--convert-event e)
+(defun maccalfw--convert-reminder (reminder)
+  "Convert REMINDER to a calfw event.
+REMINDER is one of the items returned by `maccalfw-fetch-reminders'.
+Unlike an event, a reminder has no inherent duration, so it is always
+converted to a single-instant span (same start and end): all-day on
+its DUE date if DUE has no time-of-day, at the DUE time itself
+otherwise (rendered with a default block height by calfw-blocks, see
+`calfw-blocks-default-event-length'). A reminder with no DUE at all is
+shown today, all-day."
+  (let* ((due (ical-form-event-get reminder 'DUE t))
+         (all-day-p (if due (alist-get 'ALL-DAY-P (cdr due)) t))
+         (start (decode-time (or (car due) (current-time))))
+         (args
+          (list
+           :start-date  (maccalfw--decode-date start)
+           :start-time  (unless all-day-p
+                          (maccalfw--decode-time start))
+           :end-date    (maccalfw--decode-date start)
+           :end-time    (unless all-day-p
+                          (maccalfw--decode-time start))
+           :title       (ical-form-event-get reminder 'SUMMARY)
+           :location    (ical-form-event-get reminder 'LOCATION)
+           :description (ical-form-event-get reminder 'DESCRIPTION))))
+    (when (and (alist-get 'status (cl-struct-slot-info 'calfw-event))
+               (alist-get 'data (cl-struct-slot-info 'calfw-event)))
+      (setq args
+            (append args (list
+                          :status (ical-form-event-get reminder 'STATUS)
+                          :data        reminder))))
+    (apply #'make-calfw-event args)))
+
+(defun maccalfw--convert-to-calfw (events-list &optional converter)
+  "Convert an EVENTS-LIST to calfw events using CONVERTER.
+CONVERTER defaults to `maccalfw--convert-event'; pass
+`maccalfw--convert-reminder' to convert reminders instead."
+  (cl-loop with converter = (or converter #'maccalfw--convert-event)
+           for e in events-list
+           for event = (funcall converter e)
            if event
            if (not (or (calfw-event-start-time event)
                        (calfw-event-end-time event)))
@@ -303,82 +352,124 @@ The event is returned `maccalfw-fetch-events'."
              (message "Cannot handle this event, tag: %s" e))
            finally return `((periods ,periods) ,@contents)))
 
-(defvar maccalfw--events-cache nil
-  "Cache (KEY TIMESTAMP . EVENTS-BY-CALENDAR) of the most recent
-combined `maccalfw-fetch-events' call. See
-`maccalfw--fetch-events-cached'.")
+(defvar maccalfw--items-cache nil
+  "Cache (KEY TIMESTAMP . ITEMS-BY-CALENDAR) of the most recent combined
+`maccalfw-fetch-events'/`maccalfw-fetch-reminders' call. See
+`maccalfw--fetch-items-cached'.")
 
-(defconst maccalfw--events-cache-ttl 2.0
-  "How long, in seconds, `maccalfw--events-cache' stays valid.
+(defconst maccalfw--items-cache-ttl 2.0
+  "How long, in seconds, `maccalfw--items-cache' stays valid.
 calfw queries every configured calendar as a separate source, but
 they all query the same visible date range synchronously,
 microseconds apart, on every redraw -- long enough to dedupe that
-into one `maccalfw-fetch-events' call instead of one per calendar;
-short enough that staying on the same range for a while still
-notices external changes (e.g. synced from another device) rather
-than showing stale data indefinitely. Edits made through
+into one fetch call per TYPE instead of one per calendar; short
+enough that staying on the same range for a while still notices
+external changes (e.g. synced from another device) rather than
+showing stale data indefinitely. Edits made through
 `maccalfw-update-event'/`maccalfw-remove-event' also invalidate the
 cache directly, so a refresh right after an edit is never stale
 regardless of the TTL.")
 
-(defun maccalfw--invalidate-events-cache ()
-  "Discard `maccalfw--events-cache', forcing the next fetch to be fresh."
-  (setq maccalfw--events-cache nil))
+(defun maccalfw--invalidate-items-cache ()
+  "Discard `maccalfw--items-cache', forcing the next fetch to be fresh."
+  (setq maccalfw--items-cache nil))
 
-(defun maccalfw--fetch-events-cached (cal-ids begin end)
-  "Return a hash table of CAL-ID -> events between BEGIN and END.
-CAL-IDS is the full set of calendar IDs being displayed together;
-they're all fetched in a single `maccalfw-fetch-events' call and
-the result cached briefly (see `maccalfw--events-cache-ttl') and
-split by each event's X-EMACS-CALID, rather than each calendar
-querying separately."
-  (let ((key (list cal-ids begin end)))
-    (unless (and maccalfw--events-cache
-                (equal key (nth 0 maccalfw--events-cache))
-                (< (- (float-time) (nth 1 maccalfw--events-cache))
-                   maccalfw--events-cache-ttl))
-      (let ((by-cal (make-hash-table :test #'equal)))
-        (dolist (event (maccalfw-fetch-events
-                        cal-ids
-                        (maccalfw--encode-date begin)
-                        (maccalfw--encode-date end t)))
-          (push event (gethash (ical-form-event-get event 'X-EMACS-CALID)
-                               by-cal)))
+(defun maccalfw--fetch-items-cached (type cal-ids begin end)
+  "Return a hash table of CAL-ID -> items of TYPE, from CAL-IDS.
+TYPE is `event' or `reminder' (see `maccalfw-get-calendars'); it picks
+`maccalfw-fetch-events' or `maccalfw-fetch-reminders'. CAL-IDS is the
+full set of calendar IDs of TYPE being displayed together; they're all
+fetched in a single call and the result cached briefly (see
+`maccalfw--items-cache-ttl') and split by each item's X-EMACS-CALID,
+rather than each calendar querying separately.
+
+BEGIN/END bound the fetch for events; pass nil for reminders, which
+aren't date-bounded server-side to begin with -- passing nil (rather
+than the visible range) keeps the cache key, and hence the fetched
+set, stable while paging between dates instead of missing a cache hit
+on every navigation. `maccalfw--get-calendar-items' applies the actual
+date-range filter itself, from the full set this returns."
+  (let ((key (list type cal-ids begin end)))
+    (unless (and maccalfw--items-cache
+                (equal key (nth 0 maccalfw--items-cache))
+                (< (- (float-time) (nth 1 maccalfw--items-cache))
+                   maccalfw--items-cache-ttl))
+      (let ((by-cal (make-hash-table :test #'equal))
+            (items (if (eq type 'event)
+                      (maccalfw-fetch-events
+                       cal-ids
+                       (maccalfw--encode-date begin)
+                       (maccalfw--encode-date end t))
+                    (maccalfw-fetch-reminders cal-ids))))
+        (dolist (item items)
+          (push item (gethash (ical-form-event-get item 'X-EMACS-CALID)
+                              by-cal)))
         (maphash (lambda (k v) (puthash k (nreverse v) by-cal)) by-cal)
-        (setq maccalfw--events-cache (list key (float-time) by-cal))))
-    (nth 2 maccalfw--events-cache)))
+        (setq maccalfw--items-cache (list key (float-time) by-cal))))
+    (nth 2 maccalfw--items-cache)))
 
-(defun maccalfw--get-calendar-events (cal-ids cal-id begin end)
-  "Return all calendar events corresponding to CAL-ID.
-BEGIN and END are dates with the format (month day year). The
-events between BEGIN and END are returned. CAL-IDS is the full set
-of calendar IDs sharing the underlying fetch; see
-`maccalfw--fetch-events-cached'."
-  (cl-loop for event in
-           (maccalfw--convert-to-calfw
-            (gethash cal-id (maccalfw--fetch-events-cached cal-ids begin end)))
-           if (and (listp event)
-                   (equal 'periods (car event)))
-           collect
-           (cons
-            'periods
-            (cl-loop for evt in (cadr event)
-                     collect evt))
-           else
-           collect event))
+(defun maccalfw--reminder-date (reminder)
+  "Return the (month day year) date REMINDER is shown on.
+A reminder due today or with no DUE date at all is shown today; one
+due on another day is shown there instead, regardless of its
+time-of-day."
+  (maccalfw--decode-date
+   (decode-time
+    (or (ical-form-event-get reminder 'DUE) (current-time)))))
 
-(defun maccalfw--create-source (all-cal-ids name cal-id color)
+(defun maccalfw--get-calendar-items (type cal-ids cal-id begin end)
+  "Return calfw items of TYPE for CAL-ID, in range BEGIN to END.
+TYPE is `event' or `reminder' (see `maccalfw-get-calendars'); it picks
+the converter (`maccalfw--convert-event'/`maccalfw--convert-reminder')
+and, for a reminder, whether `maccalfw--reminder-date' -- rather than
+DTSTART/DTEND -- decides membership in the range. BEGIN and END are
+dates with the format (month day year). CAL-IDS is the full set of
+calendar IDs of TYPE sharing the underlying fetch; see
+`maccalfw--fetch-items-cached'."
+  (let* ((all-items (gethash cal-id
+                             (maccalfw--fetch-items-cached
+                              type cal-ids
+                              (and (eq type 'event) begin)
+                              (and (eq type 'event) end))))
+         (items
+          (if (eq type 'event)
+              all-items
+            (let ((begin-time (maccalfw--encode-date begin))
+                  (end-time (maccalfw--encode-date end t)))
+              (cl-remove-if-not
+               (lambda (reminder)
+                 (let ((date-time (maccalfw--encode-date
+                                    (maccalfw--reminder-date reminder))))
+                   (and (not (time-less-p date-time begin-time))
+                        (not (time-less-p end-time date-time)))))
+               all-items))))
+         (converter (if (eq type 'event)
+                        #'maccalfw--convert-event
+                      #'maccalfw--convert-reminder)))
+    (cl-loop for event in (maccalfw--convert-to-calfw items converter)
+             if (and (listp event)
+                     (equal 'periods (car event)))
+             collect
+             (cons
+              'periods
+              (cl-loop for evt in (cadr event)
+                       collect evt))
+             else
+             collect event)))
+
+(defun maccalfw--create-source (all-cal-ids name cal-id color type)
   "Create a calfw-source out of a calendar.
-CAL-ID is the ID of the calendar and get be obtained with
-`maccalfw-get-calendars'. The calendar's NAME and COLOR are set
-accordingly. ALL-CAL-IDS is the full set of calendar IDs being
-displayed together; see `maccalfw--fetch-events-cached'."
+CAL-ID is the ID of the calendar and its own TYPE (`event' or
+`reminder') can be obtained with `maccalfw-get-calendars'. The
+calendar's NAME and COLOR are set accordingly. ALL-CAL-IDS is the full
+set of calendar IDs of TYPE being displayed together; see
+`maccalfw--fetch-items-cached'."
   (make-calfw-source
    :name name
    :color color
    :update #'ignore
    :data (lambda (begin end)
-           (maccalfw--get-calendar-events all-cal-ids cal-id begin end))))
+           (maccalfw--get-calendar-items type all-cal-ids cal-id begin end))))
 
 (defun maccalfw-get-calendars-by-name (names)
   "Return the calendar IDs with NAMES."
@@ -387,29 +478,38 @@ displayed together; see `maccalfw--fetch-events-cached'."
    (maccalfw-get-calendars)))
 
 (defun maccalfw-open (&optional calendars)
-  "Open a calfw calendar with CALENDARS from Apple's Calendar.
+  "Open a calfw calendar with CALENDARS from Apple's Calendar/Reminders.
 This command displays any CALENDARS obtained using
-`maccalfw-get-calendars' or all of them if it is \\='all."
+`maccalfw-get-calendars' or all event calendars if it is \\='all.
+CALENDARS may mix event and reminder calendars (e.g. from
+`(maccalfw-get-calendars \\='all)'); each is dispatched to an events or
+a reminders source by its own :type."
   (interactive (list 'all))
   (maccalfw--cli-ensure)
   (when (eq calendars 'all)
     (setq calendars (maccalfw-get-calendars)))
-  (let ((all-cal-ids (mapcar (lambda (x) (plist-get x :id)) calendars)))
-    (calfw-open-calendar-buffer
-     :view (if (featurep 'calfw-blocks)
-               'block-week
-             'week)
-     :contents-sources
-     (mapcar
-      (lambda (x)
-        (maccalfw--create-source all-cal-ids
-                                 (plist-get x :title)
-                                 (plist-get x :id)
-                                 (plist-get x :color)))
-      calendars)
-     :sorter (or (and (fboundp 'calfw-blocks-default-sorter)
-                      #'calfw-blocks-default-sorter)
-               #'string-lessp))))
+  (calfw-open-calendar-buffer
+   :view (if (featurep 'calfw-blocks)
+             'block-week
+           'week)
+   :contents-sources
+   (cl-loop for type in '(event reminder)
+            for cals = (cl-remove-if-not
+                        (lambda (x) (equal (plist-get x :type) (symbol-name type)))
+                        calendars)
+            for ids = (mapcar (lambda (x) (plist-get x :id)) cals)
+            append
+            (mapcar
+             (lambda (x)
+               (maccalfw--create-source ids
+                                        (plist-get x :title)
+                                        (plist-get x :id)
+                                        (plist-get x :color)
+                                        type))
+             cals))
+   :sorter (or (and (fboundp 'calfw-blocks-default-sorter)
+                    #'calfw-blocks-default-sorter)
+             #'string-lessp)))
 
 (defun maccalfw-delete-event (ev)
   "Delete event EV."
