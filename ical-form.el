@@ -29,6 +29,7 @@
 ;;; Code:
 (require 'wid-edit)
 (require 'org)
+(require 'shr)
 
 (defcustom ical-form-event-updated-hook nil
   "Hook called when an event is updated successfully.
@@ -37,10 +38,22 @@ second is the new event data."
   :type 'hook
   :group 'ical-form)
 
-(defcustom ical-form-render-html-p #'ignore
-  "A function to detect if an event content should be rendered in shr."
-  :type 'function
-  :group 'ical-form)
+(defconst ical-form--html-tag-rx
+  ;; [[:space:]] does not match newline in Emacs regexps, so this
+  ;; spells out the whitespace characters explicitly.
+  "</?[a-zA-Z][-a-zA-Z0-9]*\\(?:[ \t\n\r][^<>]*\\)?/?>"
+  "Regexp matching generic HTML/XML tag syntax.
+Deliberately doesn't check the tag name against a list of known
+HTML elements: no purely syntactic or structural check can
+distinguish a real tag from a stray bracketed word like \"<TBD>\"
+anyway (rendering strips both the same way), so this just gates
+against obviously-plain text before bothering to parse/render at
+all -- `ical-form--html-content-maybe' is what actually decides
+whether rendering did anything worth keeping.")
+
+(defun ical-form--looks-like-html-p (content)
+  "Return non-nil if CONTENT contains anything that looks like a tag."
+  (string-match-p ical-form--html-tag-rx content))
 
 (defcustom ical-form-update-event-function
   (lambda (&rest _) (error "`ical-form-update-event-function' not set correctly."))
@@ -135,7 +148,17 @@ Returns a list (DATE (ALL-DAY-P val) (TZ val))."
                               "T000000"
                             "")))))
       (if parsed-date
-          (list (apply #'encode-time parsed-date)
+          ;; `parse-time-string' leaves the ZONE slot nil for a bare
+          ;; wall-clock string like "20260810T083000" (no trailing Z),
+          ;; which makes `encode-time' assume system-local time. A
+          ;; TZID names a specific zone instead, so it must be plugged
+          ;; into that slot -- otherwise a TZID'd time is silently
+          ;; misinterpreted as being in whatever zone Emacs is
+          ;; currently running in.
+          (list (encode-time
+                 (if time-zone-id
+                     (append (butlast parsed-date) (list time-zone-id))
+                   parsed-date))
                 `(ALL-DAY-P . ,is-all-day)
                 `(TZID . ,time-zone-id))
         (error "Failed to parse iCal list")))))
@@ -152,7 +175,13 @@ specifies the timezone."
                   (all-day "%Y%m%d")
                   (time-zone-id "%Y%m%dT%H%M%S")
                   (t "%Y%m%dT%H%M%SZ")))
-         (time-string (format-time-string format date)))
+         ;; DATE is an absolute instant; formatting it without pinning
+         ;; ZONE to TIME-ZONE-ID would print the wall-clock time in
+         ;; whatever zone Emacs is currently running in, while still
+         ;; tagging it with TIME-ZONE-ID's TZID param -- a mismatched
+         ;; pair that decodes to the wrong instant on read-back.
+         (time-string (format-time-string
+                       format date (or time-zone-id (and (not all-day) t)))))
     (list params time-string)))
 
 (defun ical-form--parse-ical-rrule (ical-list)
@@ -197,7 +226,7 @@ If SUBPROP is nil, return the element value of PROP. If SUBPROP
 is t, return (PROP-VALUE ALIST) where ALIST is a a list of
 subproperties. Otherwise, return value corresponding to SUBPROP
 from ALIST."
-  (when-let (prop-val (alist-get prop event))
+  (when-let* ((prop-val (alist-get prop event)))
     (let* ((parse-quote-string (lambda (x) (list (intern
                                                   (downcase (cadr x))))))
            (trans
@@ -334,7 +363,7 @@ If DUPLICATE is non-nil, save the event as a new one."
                    ,(when (ical-form--value 'recurrence-p widgets)
                       (ical-form--value 'recurrence widgets)))
             (LOCATION nil ,(ical-form--value 'location widgets))
-            (DESCRIPTION nil ,(ical-form--value 'notes widgets))
+            (DESCRIPTION nil ,(ical-form--notes-value widgets))
             (X-EMACS-AVAILABILITY
              nil
              ,(upcase (symbol-name
@@ -789,19 +818,92 @@ checkbox."
                       (ical-form--show-hide-widget
                        wid (cl-some #'identity vis))))))
 
+(defun ical-form--collapse-whitespace (string)
+  "Collapse runs of whitespace in STRING to a single space, trimmed.
+HTML treats runs of whitespace, including newlines, as
+insignificant, so shr's rendering of otherwise-plain text can
+differ from the raw source purely in whitespace. Comparing
+collapsed forms avoids mistaking that for a meaningful change."
+  ;; [[:space:]] does not match newline in Emacs regexps, so this
+  ;; spells out the whitespace characters explicitly.
+  (string-trim (replace-regexp-in-string "[ \t\n\r\f]+" " " string)))
+
 (defun ical-form--html-content-maybe (content)
-  "Insert content rendered as HTML using shr.
-If the function in `ical-form-render-html-p' returns nil, just
-return CONTENT as is, otherwise return a rendering in SHR."
+  "Render CONTENT as HTML using shr, if that would change anything.
+Return a cons (RENDERED-P . TEXT). RENDERED-P is non-nil if TEXT
+is a shr rendering of CONTENT that actually differs from it
+(ignoring whitespace-only differences); it is nil, and TEXT is
+just CONTENT, if CONTENT doesn't look like HTML to begin with (see
+`ical-form--looks-like-html-p'), if Emacs has no libxml support to
+parse it, or if shr's rendering turns out to be the same as
+CONTENT anyway (nothing to gain from treating it as HTML, so it
+stays a plain editable field)."
   ;; Inspired by `notmuch-show--insert-part-text/html-shr'
-  (if (funcall ical-form-render-html-p content)
-      (with-temp-buffer
-        (shr-insert-document
-         (with-temp-buffer
-           (insert content)
-           (libxml-parse-html-region (point-min) (point-max))))
-        (buffer-substring (point-min) (point-max)))
-    content))
+  (if (and (libxml-available-p)
+           (ical-form--looks-like-html-p content))
+      (let ((rendered
+             (with-temp-buffer
+               (let ((shr-width (or (ignore-errors (window-body-width))
+                                    shr-width))
+                     (shr-inhibit-images t))
+                 (shr-insert-document
+                  (with-temp-buffer
+                    (insert content)
+                    (libxml-parse-html-region (point-min) (point-max)))))
+               (buffer-substring (point-min) (point-max)))))
+        (if (equal (ical-form--collapse-whitespace rendered)
+                   (ical-form--collapse-whitespace content))
+            (cons nil content)
+          (cons t rendered)))
+    (cons nil content)))
+
+(defun ical-form--notes-read-only (&rest _junk)
+  "Ignoring the arguments, signal an error.
+Used as a `modification-hooks' entry on the notes/description
+field while it is showing a rendered HTML preview rather than
+its raw source."
+  (unless inhibit-read-only
+    (error
+     "Showing a rendered preview; use `ical-form-toggle-notes-source' to edit")))
+
+(defun ical-form--notes-value (widgets)
+  "Return the current value of the notes/description field in WIDGETS.
+If the field is currently showing a rendered HTML preview, this
+returns the underlying raw source instead of the rendered text,
+so that saving an untouched HTML description never overwrites it
+with a lossy flattened copy."
+  (let ((wid (ical-form--find-widget 'notes widgets)))
+    (if (and (widget-get wid :html-rendered)
+             (not (widget-get wid :editing-raw)))
+        (widget-get wid :raw-value)
+      (widget-value wid))))
+
+(defun ical-form-toggle-notes-source (widget)
+  "Toggle the notes/description WIDGET between rendered and raw source.
+WIDGET must have been created with :html-rendered non-nil."
+  (if (widget-get widget :editing-raw)
+      ;; Currently showing the editable raw source; switch to a rendered,
+      ;; read-only preview, folding in whatever the user just edited --
+      ;; unless it no longer contains anything worth rendering, in which
+      ;; case just stay a plain editable field.
+      (let* ((raw (widget-value widget))
+             (rendered (ical-form--html-content-maybe raw)))
+        (widget-put widget :raw-value raw)
+        (widget-put widget :html-rendered (car rendered))
+        (widget-value-set widget (cdr rendered))
+        (widget-put widget :editing-raw nil)
+        (if (car rendered)
+            (ical-form--widget-overlay
+             widget :inactive nil
+             'evaporate t 'priority 100
+             'modification-hooks '(ical-form--notes-read-only))
+          (ical-form--widget-overlay widget :inactive t)))
+    ;; Currently showing the rendered, read-only preview; switch to editing
+    ;; the raw source.
+    (ical-form--widget-overlay widget :inactive t)
+    (widget-value-set widget (widget-get widget :raw-value))
+    (widget-put widget :editing-raw t))
+  (widget-setup))
 
 (defun ical-form-rebuild-buffer (event &optional no-erase)
   "Rebuild ical-form buffer from EVENT.
@@ -1052,8 +1154,8 @@ characters."
                :format ,(ical-form--make-intangible
                          "every " "%v" " ")
                :size 5
-               ,(or (when-let (interval
-                               (alist-get 'INTERVAL recur))
+               ,(or (when-let* ((interval
+                                (alist-get 'INTERVAL recur)))
                       (format "%d" interval))
                     "1"))
 
@@ -1108,7 +1210,7 @@ characters."
                          "%v"
                          "\n")
                :size 10
-               ,(or (when-let (mdays (alist-get 'BYMONTHDAY recur))
+               ,(or (when-let* ((mdays (alist-get 'BYMONTHDAY recur)))
                       (string-join (cl-loop for i in mdays
                                             collect (number-to-string i))
                                    ", "))
@@ -1134,7 +1236,7 @@ characters."
                :keymap ical-form-field-map
                :format "on weeks of year [-53 to 53]: %v\n"
                :size 10
-               ,(or (when-let (mdays (alist-get 'BYWEEKNO recur))
+               ,(or (when-let* ((mdays (alist-get 'BYWEEKNO recur)))
                       (string-join (cl-loop for i in mdays
                                             collect (number-to-string i))
                                    ", "))
@@ -1145,7 +1247,7 @@ characters."
                :keymap ical-form-field-map
                :format "on days of year [-366 to 366]: %v\n"
                :size 10
-               ,(or (when-let (mdays (alist-get 'BYYEARDAY recur))
+               ,(or (when-let* ((mdays (alist-get 'BYYEARDAY recur)))
                       (string-join (cl-loop for i in mdays
                                             collect (number-to-string i))
                                    ", "))
@@ -1173,7 +1275,7 @@ characters."
                ;; change as text is added to it
                :format ,(concat SPC "%v" SPC)
                :size 10
-               ,(or (when-let (end-date (alist-get 'UNTIL recur))
+               ,(or (when-let* ((end-date (alist-get 'UNTIL recur)))
                       (format-time-string "%F" end-date))
                     ""))
 
@@ -1184,8 +1286,8 @@ characters."
                :format ,(concat SPC "%v"
                                 (ical-form--make-intangible " occurrences"))
                :size 5
-               ,(or (when-let (occurrence-count
-                               (alist-get 'COUNT recur))
+               ,(or (when-let* ((occurrence-count
+                                (alist-get 'COUNT recur)))
                       (format "%d" occurrence-count))
                     ""))
              ;; TODO: Unimplemented features:
@@ -1241,7 +1343,7 @@ characters."
                             ((equal up-field-key "UNTIL")
                              (concat (format-time-string "%Y%m%d" value nil)
                                      ;; Get the time from the current entry
-                                     (if-let ((prev-until (ical-form-event-get
+                                     (if-let* ((prev-until (ical-form-event-get
                                                            (ical-form-data)
                                                            'RRULE
                                                            'UNTIL)))
@@ -1268,7 +1370,7 @@ characters."
 
     (widget-insert NL2)
 
-    (when-let (stat (ical-form-event-get event 'STATUS))
+    (when-let* ((stat (ical-form-event-get event 'STATUS)))
       (unless (eq stat 'none)
         (widget-insert
          (ical-form--make-intangible
@@ -1277,7 +1379,7 @@ characters."
                   (symbol-name stat)
                   NL2)))))
 
-    (when-let (org (ical-form-event-get event 'ORGANIZER))
+    (when-let* ((org (ical-form-event-get event 'ORGANIZER)))
       (widget-insert
        (ical-form--make-intangible
         (concat (propertize "Organizer: "
@@ -1296,14 +1398,27 @@ characters."
       "%v" "\n\n")
      (or (ical-form-event-get event 'URL) ""))
 
-    (widget-create
-     'text
-     :field-key 'notes
-     :format "%v" ; Text after the field!
-     :keymap ical-form-text-map
-     :value-face 'ical-form-notes-field
-     (ical-form--html-content-maybe
-      (or (ical-form-event-get  event 'DESCRIPTION) "")))
+    (let* ((raw-notes (or (ical-form-event-get event 'DESCRIPTION) ""))
+           (rendered (ical-form--html-content-maybe raw-notes))
+           (html-rendered (car rendered))
+           notes-wid)
+      (when html-rendered
+        (widget-create
+         'push-button
+         :notify (lambda (&rest _)
+                   (ical-form-toggle-notes-source notes-wid))
+         "Toggle rendered/source")
+        (widget-insert "\n"))
+      (setq notes-wid
+            (widget-create
+             'text
+             :field-key 'notes
+             :format "%v" ; Text after the field!
+             :keymap ical-form-text-map
+             :value-face 'ical-form-notes-field
+             :html-rendered html-rendered
+             :raw-value raw-notes
+             (cdr rendered))))
 
     (insert (propertize "\n" 'cursor-intangible t
                         'rear-nonsticky nil
@@ -1318,6 +1433,17 @@ characters."
                for notify = (widget-get wid :notify)
                when (eq notify #'ical-form--hs-action)
                do (funcall notify wid))
+
+      ;; If the notes field is showing a rendered HTML preview, make it
+      ;; read-only until toggled to editing its raw source (see
+      ;; `ical-form-toggle-notes-source'), so that saving an untouched
+      ;; HTML description never overwrites it with the flattened preview.
+      (when-let* ((notes-wid (ical-form--find-widget 'notes widgets))
+                  ((widget-get notes-wid :html-rendered)))
+        (ical-form--widget-overlay
+         notes-wid :inactive nil
+         'evaporate t 'priority 100
+         'modification-hooks '(ical-form--notes-read-only)))
 
       ;; This causes all lists of radio buttons to skip text when tabbing,
       ;; instead just going through the buttons
