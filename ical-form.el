@@ -880,6 +880,24 @@ with a lossy flattened copy."
         (widget-get wid :raw-value)
       (widget-value wid))))
 
+(defun ical-form--widget-resync-field-bounds (widget)
+  "Repoint field WIDGET's stale :from/:to markers at its live bounds.
+`widget-value-set' deletes and reinserts the field's text at the old
+:from marker; since that marker's insertion type is t, the insertion
+pushes it to the far side of the new text instead of leaving it at
+the field's start, corrupting it into pointing past the field (often
+right next to :to). Any overlay later built from :from/:to -- such as
+the read-only overlay guarding a rendered HTML preview -- ends up
+covering only a sliver of the field, leaving the rest silently
+editable. Reset both markers from the field's own tracked bounds,
+which `widget-value-set' keeps correct, to fix them back up."
+  (when-let* ((from (widget-get widget :from))
+              (to (widget-get widget :to))
+              (field-from (widget-field-start widget))
+              (field-to (widget-field-end widget)))
+    (set-marker from field-from)
+    (set-marker to field-to)))
+
 (defun ical-form-toggle-notes-source (widget)
   "Toggle the notes/description WIDGET between rendered and raw source.
 WIDGET must have been created with :html-rendered non-nil.
@@ -899,6 +917,7 @@ both."
             (widget-put widget :raw-value raw)
             (widget-put widget :html-rendered (car rendered))
             (widget-value-set widget (cdr rendered))
+            (ical-form--widget-resync-field-bounds widget)
             (widget-put widget :editing-raw nil)
             (if (car rendered)
                 (ical-form--widget-overlay
@@ -912,6 +931,7 @@ both."
         ;; the raw source.
         (ical-form--widget-overlay widget :inactive t)
         (widget-value-set widget (widget-get widget :raw-value))
+        (ical-form--widget-resync-field-bounds widget)
         (widget-put widget :editing-raw t)))
     (widget-setup)
     (set-buffer-modified-p modified)))
