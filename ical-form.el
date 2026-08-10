@@ -853,6 +853,15 @@ stays a plain editable field)."
                     (insert content)
                     (libxml-parse-html-region (point-min) (point-max)))))
                (buffer-substring (point-min) (point-max)))))
+        ;; shr tags links/images with a `keymap' text property (shr-map /
+        ;; shr-image-map) so they're clickable in a normal shr buffer. A
+        ;; character's `keymap' property takes priority over a widget
+        ;; field's `local-map', so left in place it hijacks ordinary
+        ;; keystrokes typed into the field -- e.g. `a' silently becomes
+        ;; `shr-show-alt-text' instead of reaching the field's read-only
+        ;; guard or self-insert. Strip it; the preview is inert text, not
+        ;; an interactive shr buffer.
+        (remove-text-properties 0 (length rendered) '(keymap nil) rendered)
         (if (equal (ical-form--collapse-whitespace rendered)
                    (ical-form--collapse-whitespace content))
             (cons nil content)
