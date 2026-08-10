@@ -235,6 +235,7 @@ from ALIST."
                  `((DTSTART . ical-form--parse-ical-date)
                    (DTEND . ical-form--parse-ical-date)
                    (DTSTAMP . ical-form--parse-ical-date)
+                   (DUE . ical-form--parse-ical-date)
                    (RRULE . ical-form--parse-ical-rrule)
                    (STATUS . ,parse-quote-string)
                    (X-EMACS-AVAILABILITY . ,parse-quote-string)))
