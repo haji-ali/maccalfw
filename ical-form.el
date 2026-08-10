@@ -659,7 +659,9 @@ If ACTIVE is t, activate widgets instead"
               wid :inactive active
               'evaporate t
               'priority 100
-              'modification-hooks '(ical-form-read-only)))))
+              'modification-hooks '(ical-form-read-only)
+              'insert-in-front-hooks '(ical-form-read-only)
+              'insert-behind-hooks '(ical-form-read-only)))))
 
 (defun ical-form--value (key widgets)
   "Get value of widget field corresponding to KEY in WIDGETS."
@@ -880,30 +882,39 @@ with a lossy flattened copy."
 
 (defun ical-form-toggle-notes-source (widget)
   "Toggle the notes/description WIDGET between rendered and raw source.
-WIDGET must have been created with :html-rendered non-nil."
-  (if (widget-get widget :editing-raw)
-      ;; Currently showing the editable raw source; switch to a rendered,
-      ;; read-only preview, folding in whatever the user just edited --
-      ;; unless it no longer contains anything worth rendering, in which
-      ;; case just stay a plain editable field.
-      (let* ((raw (widget-value widget))
-             (rendered (ical-form--html-content-maybe raw)))
-        (widget-put widget :raw-value raw)
-        (widget-put widget :html-rendered (car rendered))
-        (widget-value-set widget (cdr rendered))
-        (widget-put widget :editing-raw nil)
-        (if (car rendered)
-            (ical-form--widget-overlay
-             widget :inactive nil
-             'evaporate t 'priority 100
-             'modification-hooks '(ical-form--notes-read-only))
-          (ical-form--widget-overlay widget :inactive t)))
-    ;; Currently showing the rendered, read-only preview; switch to editing
-    ;; the raw source.
-    (ical-form--widget-overlay widget :inactive t)
-    (widget-value-set widget (widget-get widget :raw-value))
-    (widget-put widget :editing-raw t))
-  (widget-setup))
+WIDGET must have been created with :html-rendered non-nil.
+Preserves point and the buffer's modified state: toggling back and
+forth without otherwise editing the field should not move the cursor
+or dirty the buffer, since `widget-value-set' unconditionally does
+both."
+  (let ((modified (buffer-modified-p)))
+    (save-excursion
+      (if (widget-get widget :editing-raw)
+          ;; Currently showing the editable raw source; switch to a rendered,
+          ;; read-only preview, folding in whatever the user just edited --
+          ;; unless it no longer contains anything worth rendering, in which
+          ;; case just stay a plain editable field.
+          (let* ((raw (widget-value widget))
+                 (rendered (ical-form--html-content-maybe raw)))
+            (widget-put widget :raw-value raw)
+            (widget-put widget :html-rendered (car rendered))
+            (widget-value-set widget (cdr rendered))
+            (widget-put widget :editing-raw nil)
+            (if (car rendered)
+                (ical-form--widget-overlay
+                 widget :inactive nil
+                 'evaporate t 'priority 100
+                 'modification-hooks '(ical-form--notes-read-only)
+                 'insert-in-front-hooks '(ical-form--notes-read-only)
+                 'insert-behind-hooks '(ical-form--notes-read-only))
+              (ical-form--widget-overlay widget :inactive t)))
+        ;; Currently showing the rendered, read-only preview; switch to editing
+        ;; the raw source.
+        (ical-form--widget-overlay widget :inactive t)
+        (widget-value-set widget (widget-get widget :raw-value))
+        (widget-put widget :editing-raw t)))
+    (widget-setup)
+    (set-buffer-modified-p modified)))
 
 (defun ical-form-rebuild-buffer (event &optional no-erase)
   "Rebuild ical-form buffer from EVENT.
@@ -994,6 +1005,7 @@ characters."
 (defun ical-form--create-form (event)
   "Create form in current buffer corresponding to EVENT."
   (let* ((cal-id (ical-form-event-get event 'X-EMACS-CALID))
+         (read-only-p (ical-form-event-get event 'X-EMACS-READ-ONLY))
          (dt-start (ical-form-event-get event 'DTSTART t))
          (timezones ical-form--timezones)
          (calendars ical-form--calendars)
@@ -1402,7 +1414,9 @@ characters."
            (rendered (ical-form--html-content-maybe raw-notes))
            (html-rendered (car rendered))
            notes-wid)
-      (when html-rendered
+      ;; A read-only event always shows the rendered form, with no source to
+      ;; toggle to -- there's nothing to edit either way.
+      (when (and html-rendered (not read-only-p))
         (widget-create
          'push-button
          :notify (lambda (&rest _)
@@ -1443,7 +1457,9 @@ characters."
         (ical-form--widget-overlay
          notes-wid :inactive nil
          'evaporate t 'priority 100
-         'modification-hooks '(ical-form--notes-read-only)))
+         'modification-hooks '(ical-form--notes-read-only)
+         'insert-in-front-hooks '(ical-form--notes-read-only)
+         'insert-behind-hooks '(ical-form--notes-read-only)))
 
       ;; This causes all lists of radio buttons to skip text when tabbing,
       ;; instead just going through the buttons
@@ -1460,7 +1476,7 @@ characters."
 
     ;; (add-hook 'post-command-hook #'ical-form--avoid-point-max nil t)
 
-    (when (ical-form-event-get event 'X-EMACS-READ-ONLY)
+    (when read-only-p
       (ical-form--make-inactive))))
 
 (defun ical-form--avoid-point-max ()
