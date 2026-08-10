@@ -98,12 +98,6 @@ environment variable, set to MODE here."
                              :type 'maccalfw-error)))
       (should (equal "Something went wrong" (cadr err))))))
 
-(ert-deftest test-maccalfw-cli-call-unparseable-response-falls-back ()
-  (test-maccalfw--with-fake-mode "garbage-error"
-    (let ((err (should-error (maccalfw--cli-call "calendars")
-                             :type 'maccalfw-error)))
-      (should (equal "maccalq exited with code 1" (cadr err))))))
-
 ;;; calendars/timezones translation to the pre-existing shape
 
 (ert-deftest test-maccalfw-get-calendars-shape ()

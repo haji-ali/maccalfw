@@ -43,18 +43,11 @@ EOF
     exit 0
     ;;
   not-authorized)
-    echo "maccalq: nope" >&2
-    printf '((ERROR nil "not-authorized") (MESSAGE nil "Calendar access was not granted"))'
+    echo "maccalq: Calendar access was not granted" >&2
     exit 2
     ;;
   general-error)
-    echo "maccalq: nope" >&2
-    printf '((ERROR nil "error") (MESSAGE nil "Something went wrong"))'
-    exit 1
-    ;;
-  garbage-error)
-    echo "maccalq: crashed" >&2
-    printf 'not valid elisp {{{'
+    echo "maccalq: Something went wrong" >&2
     exit 1
     ;;
   *)

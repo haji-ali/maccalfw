@@ -123,13 +123,15 @@ becomes a single \"--key value\" pair (converted to a string via
 
 (defun maccalfw--cli-run (exe args input)
   "Run EXE with ARGS, writing INPUT (a string, or nil) to its stdin.
-Return (EXIT-CODE . STDOUT-STRING); stderr is discarded."
+Return (EXIT-CODE . OUTPUT-STRING). maccalq writes its result to
+stdout on success and a plain-text message to stderr on failure,
+never both, so it's safe to capture them into the same string."
   (with-temp-buffer
     (when input (insert input))
     (let ((exit-code
            (apply #'call-process-region
                   (point-min) (point-max) exe
-                  t (list t nil) nil
+                  t (list t t) nil
                   args)))
       (cons exit-code (buffer-string)))))
 
@@ -143,25 +145,20 @@ OPTIONS is a plist of CLI flags, see `maccalfw--cli-build-args'.
 INPUT, if non-nil, is a string written as the CLI's stdin (used
 by update-event to pass the changed event data).
 
-Signals `maccalfw-not-authorized' or `maccalfw-error' on failure,
-using the CLI's structured ERROR/MESSAGE payload when present."
+Signals `maccalfw-not-authorized' on exit code 2 (access not
+granted) or `maccalfw-error' on any other failure, using maccalq's
+stderr message text."
   (let* ((exe (maccalfw--cli-ensure))
          (args (maccalfw--cli-build-args
                 command (append options (list :format 'elisp))))
          (result (maccalfw--cli-run exe args input)))
     (if (equal 0 (car result))
         (maccalfw--cli-read-response (cdr result))
-      (let* ((response (ignore-errors
-                         (maccalfw--cli-read-response (cdr result))))
-             (response (and (listp response) response))
-             (err-type (and response (ical-form-event-get response 'ERROR)))
-             (msg (or (and response (ical-form-event-get response 'MESSAGE))
-                     (format "maccalq exited with code %s"
-                             (car result)))))
-        (signal (if (equal err-type "not-authorized")
-                   'maccalfw-not-authorized
-                 'maccalfw-error)
-                (list msg))))))
+      (signal (if (equal (car result) 2)
+                 'maccalfw-not-authorized
+               'maccalfw-error)
+              (list (string-trim
+                     (string-remove-prefix "maccalq: " (cdr result))))))))
 
 (defun maccalfw--iso8601 (time)
   "Format Emacs TIME as a UTC ISO8601 string for maccalq."

@@ -16,14 +16,6 @@ public enum CLIError: Error, CustomStringConvertible, Sendable {
         }
     }
 
-    public var errorType: String {
-        switch self {
-        case .notAuthorized: return "not-authorized"
-        case .invalidArgument: return "invalid-argument"
-        case .general: return "error"
-        }
-    }
-
     public var message: String {
         switch self {
         case .notAuthorized(let m), .invalidArgument(let m), .general(let m):
@@ -32,12 +24,4 @@ public enum CLIError: Error, CustomStringConvertible, Sendable {
     }
 
     public var description: String { message }
-
-    /// The structured error payload printed on stdout, in whichever
-    /// format was requested, so callers can distinguish error kinds
-    /// programmatically instead of scraping the human-readable message
-    /// (which goes to stderr separately).
-    public var properties: [ICalProperty] {
-        [ICalProperty("ERROR", value: errorType), ICalProperty("MESSAGE", value: message)]
-    }
 }

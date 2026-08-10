@@ -50,22 +50,11 @@ final class CLIErrorTests: XCTestCase {
     func testNotAuthorizedHasExitCode2() {
         let err = CLIError.notAuthorized("nope")
         XCTAssertEqual(err.exitCode, 2)
-        XCTAssertEqual(err.errorType, "not-authorized")
         XCTAssertEqual(err.message, "nope")
     }
 
     func testGeneralAndInvalidArgumentHaveExitCode1() {
         XCTAssertEqual(CLIError.general("x").exitCode, 1)
         XCTAssertEqual(CLIError.invalidArgument("x").exitCode, 1)
-        XCTAssertEqual(CLIError.general("x").errorType, "error")
-        XCTAssertEqual(CLIError.invalidArgument("x").errorType, "invalid-argument")
-    }
-
-    func testPropertiesEncodeErrorAndMessage() throws {
-        let err = CLIError.notAuthorized("Calendar access denied")
-        let elisp = ICalElispEncoder.encode(err.properties)
-        XCTAssertEqual(
-            elisp,
-            "((ERROR nil \"not-authorized\")\n (MESSAGE nil \"Calendar access denied\"))")
     }
 }
