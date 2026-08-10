@@ -37,64 +37,207 @@
 
 (require 'calfw)
 (require 'ical-form)
-
-(declare-function maccalfw-timezones "libmaccalfw" ())
-(declare-function maccalfw-get-calendars "libmaccalfw" ())
-(declare-function maccalfw-update-event "libmaccalfw"
-                  (id changed-data &optional start future))
-(declare-function maccalfw-remove-event "libmaccalfw"
-                  (id &optional start future))
-(declare-function maccalfw-fetch-events "libmaccalfw"
-                  (calendar-id start-time end-time))
+(require 'cl-lib)
 
 (defvar maccalfw-modify-future-events-p 'ask
   "If non-nil, modifying events with recurrences applies to future events.
 Special value \\='ask, prompts the user.")
 
-(defun maccalfw--load-module (&optional force)
-  "Load an compile dynamic module for maccalfw.
-If FORCE is nil, then the module is not compiled nor re-loaded if
-already loaded. \\='compile forces recompilation before
-re-loading and \\='compile-only forces recompilation without
-loading."
-  (unless (and (not force) (fboundp #'maccalfw-get-calendars))
-    (unless module-file-suffix
-      (error "maccalfw: Dynamic modules are not supported"))
-    (let* ((mod-name (file-name-with-extension
-                      "libmaccalfw"
-                      module-file-suffix))
-           (mod-file (locate-library mod-name t)))
-      (unless (and mod-file (not (member force '(compile compile-only))))
-        (let* ((swift (or (getenv "SWIFTC")
-                          (executable-find "swiftc")
-                          (error "maccalfw: No swift compiler found")))
-               (default-directory (file-name-directory
-                                   (locate-library "maccalfw")))
-               (command
-                `(,swift "-Xcc" "-fmodule-map-file=src/module.modulemap"
-                         "-I/opt/homebrew/include/"
-                         "src/EmacsUtil.swift"
-                         "src/MacCalfw.swift"
-                         "-O" "-emit-library"
-                         "-o" ,mod-name)))
-          (with-current-buffer
-              (get-buffer-create "*maccalfw module compilation*")
-            (let ((inhibit-read-only t))
-              (erase-buffer)
-              (compilation-mode)
-              (insert (string-join command " ") "\n")
-              (if (equal 0 (apply #'call-process (car command) nil
-                                  (current-buffer) t (cdr command)))
-                  (insert (message "maccalfw: %s compiled successfully"
-                                   mod-name))
-                (let ((msg (format "maccalfw: Compilation of %s failed"
-                                   mod-name)))
-                  (insert msg)
-                  (pop-to-buffer (current-buffer))
-                  (error msg)))))
-          (setq mod-file (expand-file-name mod-name))))
-      (unless (eq force 'compile-only)
-        (module-load mod-file)))))
+(define-error 'maccalfw-error "maccalfw error")
+(define-error 'maccalfw-not-authorized
+              "Calendar/Reminders access not authorized" 'maccalfw-error)
+
+(defvar maccalfw--cli-executable nil
+  "Cached path to the built `maccalq' executable.
+Set this directly to point at an alternative binary, e.g. in tests.")
+
+(defun maccalfw--cli-bin-path (swift)
+  "Return the directory SWIFT's release build output goes to."
+  (with-temp-buffer
+    (unless (equal 0 (call-process swift nil t nil
+                                   "build" "-c" "release" "--show-bin-path"))
+      (error "maccalfw: Failed to determine swift build output path"))
+    (string-trim (buffer-string))))
+
+(defun maccalfw--cli-build (&optional force)
+  "Build maccalq via Swift Package Manager, returning its path.
+Skip building if an up-to-date binary already exists and FORCE is
+nil."
+  (let* ((swift (or (getenv "SWIFT")
+                    (executable-find "swift")
+                    (error "maccalfw: No swift compiler found")))
+         (default-directory (file-name-directory (locate-library "maccalfw")))
+         (exe (expand-file-name
+               "maccalq" (maccalfw--cli-bin-path swift))))
+    (when (or force (not (file-executable-p exe)))
+      (with-current-buffer (get-buffer-create "*maccalq build*")
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (compilation-mode)
+          (insert (format "%s build -c release\n" swift))
+          (if (equal 0 (call-process swift nil (current-buffer) t
+                                     "build" "-c" "release"))
+              (message "maccalfw: maccalq built successfully")
+            ;; Don't assume a window/frame is available to pop the
+            ;; output up in -- this can run during package
+            ;; installation, before any frame exists, and popping up a
+            ;; buffer would itself fail there, masking this error with
+            ;; a confusing one about no window system being available.
+            ;; Put the actual build output in the error text instead;
+            ;; *maccalq build* still has it for later inspection.
+            (error "maccalfw: Building maccalq failed:\n%s"
+                   (buffer-string))))))
+    exe))
+
+(defun maccalfw--cli-ensure (&optional force)
+  "Return the path to a built `maccalq', building it if needed."
+  (when (or force (not maccalfw--cli-executable))
+    (setq maccalfw--cli-executable (maccalfw--cli-build force)))
+  maccalfw--cli-executable)
+
+(defun maccalfw--cli-arg-string (value)
+  "Convert VALUE to a string suitable as a single CLI argument."
+  (if (stringp value) value (format "%s" value)))
+
+(defun maccalfw--cli-build-args (command options)
+  "Build a maccalq argv list for COMMAND with OPTIONS.
+OPTIONS is a plist. A value of t means a boolean flag with no
+value (e.g. :future t -> \"--future\"). A list value repeats the
+flag once per element. nil values are omitted. Any other value
+becomes a single \"--key value\" pair (converted to a string via
+`maccalfw--cli-arg-string' if it isn't one already)."
+  (let (args)
+    (cl-loop for (key value) on options by #'cddr
+             for flag = (concat "--" (string-remove-prefix
+                                      ":" (symbol-name key)))
+             do (cond
+                 ((null value))
+                 ((eq value t) (push flag args))
+                 ((listp value)
+                  (dolist (v value)
+                    (push flag args)
+                    (push (maccalfw--cli-arg-string v) args)))
+                 (t (push flag args)
+                    (push (maccalfw--cli-arg-string value) args))))
+    (cons command (nreverse args))))
+
+(defun maccalfw--cli-run (exe args input)
+  "Run EXE with ARGS, writing INPUT (a string, or nil) to its stdin.
+Return (EXIT-CODE . STDOUT-STRING); stderr is discarded."
+  (with-temp-buffer
+    (when input (insert input))
+    (let ((exit-code
+           (apply #'call-process-region
+                  (point-min) (point-max) exe
+                  t (list t nil) nil
+                  args)))
+      (cons exit-code (buffer-string)))))
+
+(defun maccalfw--cli-read-response (output)
+  "Read OUTPUT (a string) as a single elisp sexp."
+  (car (read-from-string output)))
+
+(defun maccalfw--cli-call (command &optional options input)
+  "Run maccalq COMMAND with OPTIONS, returning its parsed result.
+OPTIONS is a plist of CLI flags, see `maccalfw--cli-build-args'.
+INPUT, if non-nil, is a string written as the CLI's stdin (used
+by update-event to pass the changed event data).
+
+Signals `maccalfw-not-authorized' or `maccalfw-error' on failure,
+using the CLI's structured ERROR/MESSAGE payload when present."
+  (let* ((exe (maccalfw--cli-ensure))
+         (args (maccalfw--cli-build-args
+                command (append options (list :format 'elisp))))
+         (result (maccalfw--cli-run exe args input)))
+    (if (equal 0 (car result))
+        (maccalfw--cli-read-response (cdr result))
+      (let* ((response (ignore-errors
+                         (maccalfw--cli-read-response (cdr result))))
+             (response (and (listp response) response))
+             (err-type (and response (ical-form-event-get response 'ERROR)))
+             (msg (or (and response (ical-form-event-get response 'MESSAGE))
+                     (format "maccalq exited with code %s"
+                             (car result)))))
+        (signal (if (equal err-type "not-authorized")
+                   'maccalfw-not-authorized
+                 'maccalfw-error)
+                (list msg))))))
+
+(defun maccalfw--iso8601 (time)
+  "Format Emacs TIME as a UTC ISO8601 string for maccalq."
+  (format-time-string "%Y-%m-%dT%H:%M:%SZ" time t))
+
+(defun maccalfw--cli-triples-to-plist (triples &optional bool-keys)
+  "Convert a list of (NAME PARAMS VALUE) TRIPLES to a plist.
+Keys become lowercase keyword symbols (TITLE -> :title). Keys in
+BOOL-KEYS are converted from \"yes\"/absent to t/nil instead of
+being kept as strings."
+  (cl-loop for (name _params value) in triples
+           for key = (intern (concat ":" (downcase (symbol-name name))))
+           append (list key (if (memq key bool-keys)
+                               (equal value "yes")
+                             value))))
+
+(defun maccalfw-get-calendars (&optional type)
+  "Return Mac calendars as plists (:id :title :color :editable :default).
+TYPE is \"event\" (the default), \"reminder\", or \"all\"."
+  (mapcar (lambda (triples)
+            (maccalfw--cli-triples-to-plist triples '(:editable :default)))
+          (maccalfw--cli-call "calendars" (list :type (or type "event")))))
+
+(defun maccalfw-timezones ()
+  "Return system timezones as an alist of (ID . PLIST).
+PLIST has :name, :abbrev, :offset (an integer, seconds from GMT),
+and :default when applicable."
+  (mapcar
+   (lambda (triples)
+     (let* ((plist (maccalfw--cli-triples-to-plist triples '(:default)))
+            (id (plist-get plist :id)))
+       (cons id (cl-loop for (k v) on plist by #'cddr
+                         unless (eq k :id)
+                         append (list k (if (eq k :offset)
+                                           (string-to-number v)
+                                         v))))))
+   (maccalfw--cli-call "timezones")))
+
+(defun maccalfw-fetch-events (calendar-id start-time end-time)
+  "Return events between START-TIME and END-TIME.
+CALENDAR-ID may be nil (all calendars), a single calendar ID
+string, or a list of calendar IDs."
+  (maccalfw--cli-call
+   "events"
+   (list :start (maccalfw--iso8601 start-time)
+         :end (maccalfw--iso8601 end-time)
+         :calendar (cond ((null calendar-id) nil)
+                        ((stringp calendar-id) (list calendar-id))
+                        (t calendar-id)))))
+
+(defun maccalfw-update-event (id changed-data &optional start future)
+  "Update or create an event, returning the saved event's data.
+ID is the event identifier, or nil to create a new event.
+CHANGED-DATA is an alist of the fields to change, in `ical-form'
+format. START disambiguates recurring event instances sharing an
+ID. If FUTURE is non-nil, all future occurrences are updated."
+  (prog1
+      (maccalfw--cli-call
+       "update-event"
+       (list :id id
+             :start (and start (maccalfw--iso8601 start))
+             :future (and future t))
+       (prin1-to-string changed-data))
+    (maccalfw--invalidate-events-cache)))
+
+(defun maccalfw-remove-event (id &optional start future)
+  "Remove event ID, returning t on success.
+START disambiguates recurring event instances sharing an ID. If
+FUTURE is non-nil, all future occurrences are removed."
+  (maccalfw--cli-call
+   "remove-event"
+   (list :id id
+         :start (and start (maccalfw--iso8601 start))
+         :future (and future t)))
+  (maccalfw--invalidate-events-cache)
+  t)
 
 (defun maccalfw--decode-date (time)
   "Return a calendar date from encoded TIME.
@@ -163,15 +306,60 @@ The event is returned `maccalfw-fetch-events'."
              (message "Cannot handle this event, tag: %s" e))
            finally return `((periods ,periods) ,@contents)))
 
-(defun maccalfw--get-calendar-events (cal-id begin end)
-  "Return all calendar event corresponding CAL-ID.
-BEING and END are dates with the format (month day year). The
-events between BEGIN and END are returned."
+(defvar maccalfw--events-cache nil
+  "Cache (KEY TIMESTAMP . EVENTS-BY-CALENDAR) of the most recent
+combined `maccalfw-fetch-events' call. See
+`maccalfw--fetch-events-cached'.")
+
+(defconst maccalfw--events-cache-ttl 2.0
+  "How long, in seconds, `maccalfw--events-cache' stays valid.
+calfw queries every configured calendar as a separate source, but
+they all query the same visible date range synchronously,
+microseconds apart, on every redraw -- long enough to dedupe that
+into one `maccalfw-fetch-events' call instead of one per calendar;
+short enough that staying on the same range for a while still
+notices external changes (e.g. synced from another device) rather
+than showing stale data indefinitely. Edits made through
+`maccalfw-update-event'/`maccalfw-remove-event' also invalidate the
+cache directly, so a refresh right after an edit is never stale
+regardless of the TTL.")
+
+(defun maccalfw--invalidate-events-cache ()
+  "Discard `maccalfw--events-cache', forcing the next fetch to be fresh."
+  (setq maccalfw--events-cache nil))
+
+(defun maccalfw--fetch-events-cached (cal-ids begin end)
+  "Return a hash table of CAL-ID -> events between BEGIN and END.
+CAL-IDS is the full set of calendar IDs being displayed together;
+they're all fetched in a single `maccalfw-fetch-events' call and
+the result cached briefly (see `maccalfw--events-cache-ttl') and
+split by each event's X-EMACS-CALID, rather than each calendar
+querying separately."
+  (let ((key (list cal-ids begin end)))
+    (unless (and maccalfw--events-cache
+                (equal key (nth 0 maccalfw--events-cache))
+                (< (- (float-time) (nth 1 maccalfw--events-cache))
+                   maccalfw--events-cache-ttl))
+      (let ((by-cal (make-hash-table :test #'equal)))
+        (dolist (event (maccalfw-fetch-events
+                        cal-ids
+                        (maccalfw--encode-date begin)
+                        (maccalfw--encode-date end t)))
+          (push event (gethash (ical-form-event-get event 'X-EMACS-CALID)
+                               by-cal)))
+        (maphash (lambda (k v) (puthash k (nreverse v) by-cal)) by-cal)
+        (setq maccalfw--events-cache (list key (float-time) by-cal))))
+    (nth 2 maccalfw--events-cache)))
+
+(defun maccalfw--get-calendar-events (cal-ids cal-id begin end)
+  "Return all calendar events corresponding to CAL-ID.
+BEGIN and END are dates with the format (month day year). The
+events between BEGIN and END are returned. CAL-IDS is the full set
+of calendar IDs sharing the underlying fetch; see
+`maccalfw--fetch-events-cached'."
   (cl-loop for event in
            (maccalfw--convert-to-calfw
-            (maccalfw-fetch-events cal-id
-                                   (maccalfw--encode-date begin)
-                                   (maccalfw--encode-date end t)))
+            (gethash cal-id (maccalfw--fetch-events-cached cal-ids begin end)))
            if (and (listp event)
                    (equal 'periods (car event)))
            collect
@@ -182,17 +370,18 @@ events between BEGIN and END are returned."
            else
            collect event))
 
-(defun maccalfw--create-source (name cal-id color)
+(defun maccalfw--create-source (all-cal-ids name cal-id color)
   "Create a calfw-source out of a calendar.
 CAL-ID is the ID of the calendar and get be obtained with
 `maccalfw-get-calendars'. The calendar's NAME and COLOR are set
-accordingly."
+accordingly. ALL-CAL-IDS is the full set of calendar IDs being
+displayed together; see `maccalfw--fetch-events-cached'."
   (make-calfw-source
    :name name
    :color color
    :update #'ignore
    :data (lambda (begin end)
-           (maccalfw--get-calendar-events cal-id begin end))))
+           (maccalfw--get-calendar-events all-cal-ids cal-id begin end))))
 
 (defun maccalfw-get-calendars-by-name (names)
   "Return the calendar IDs with NAMES."
@@ -205,28 +394,30 @@ accordingly."
 This command displays any CALENDARS obtained using
 `maccalfw-get-calendars' or all of them if it is \\='all."
   (interactive (list 'all))
-  (maccalfw--load-module)
+  (maccalfw--cli-ensure)
   (when (eq calendars 'all)
     (setq calendars (maccalfw-get-calendars)))
-  (calfw-open-calendar-buffer
-   :view (if (featurep 'calfw-blocks)
-             'block-week
-           'week)
-   :contents-sources
-   (mapcar
-    (lambda (x)
-      (maccalfw--create-source (plist-get x :title)
-                               (plist-get x :id)
-                               (plist-get x :color)))
-    calendars)
-   :sorter (or (and (fboundp 'calfw-blocks-default-sorter)
-                    #'calfw-blocks-default-sorter)
-             #'string-lessp)))
+  (let ((all-cal-ids (mapcar (lambda (x) (plist-get x :id)) calendars)))
+    (calfw-open-calendar-buffer
+     :view (if (featurep 'calfw-blocks)
+               'block-week
+             'week)
+     :contents-sources
+     (mapcar
+      (lambda (x)
+        (maccalfw--create-source all-cal-ids
+                                 (plist-get x :title)
+                                 (plist-get x :id)
+                                 (plist-get x :color)))
+      calendars)
+     :sorter (or (and (fboundp 'calfw-blocks-default-sorter)
+                      #'calfw-blocks-default-sorter)
+               #'string-lessp))))
 
 (defun maccalfw-delete-event (ev)
   "Delete event EV."
   (interactive
-   (list (or (when-let (cfw-ev (get-text-property (point) 'cfw:event))
+   (list (or (when-let* ((cfw-ev (get-text-property (point) 'cfw:event)))
                (calfw-event-data cfw-ev))
              (error "No event at location"))))
   (or (prog1
@@ -286,7 +477,7 @@ EVENT-DATA contains the initial event information."
    (list
     (let (start end all-day ev)
       (when (derived-mode-p 'calfw-calendar-mode)
-        (if-let ((event (and current-prefix-arg
+        (if-let* ((event (and current-prefix-arg
                              (get-text-property (point) 'cfw:event)))
                  (old-event-data (calfw-event-data event)))
             (setq ev

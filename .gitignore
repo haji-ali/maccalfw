@@ -1,2 +1,4 @@
 .DS_Store
 libmaccalfw.dylib
+.build/
+.swiftpm/

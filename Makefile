@@ -1,12 +1,8 @@
-
 all: build
 
 build:
-	swiftc -Xcc -fmodule-map-file=src/module.modulemap \
-		-I/opt/homebrew/include/ \
-		src/EmacsUtil.swift \
-		src/MacCalfw.swift \
-		-O -emit-library -o libmaccalfw.dylib
+	swift build -c release
 
 test:
-	emacs -Q --batch --load test.el
+	swift test
+	emacs -Q --batch --load test.el -f ert-run-tests-batch-and-exit
