@@ -110,6 +110,17 @@ environment variable, set to MODE here."
       (should (null (plist-get (nth 1 cals) :editable)))
       (should (null (plist-get (nth 1 cals) :default))))))
 
+(ert-deftest test-maccalfw-get-calendars-reports-partial-authorization ()
+  (test-maccalfw--with-fake-mode "calendars-partial"
+    (let (messages)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+        (let ((cals (maccalfw-get-calendars 'all)))
+          (should (= 1 (length cals)))
+          (should (equal "Home" (plist-get (nth 0 cals) :title)))
+          (should (equal '("maccalfw: Reminders access is not authorized")
+                         messages)))))))
+
 (ert-deftest test-maccalfw-timezones-shape ()
   (test-maccalfw--with-fake-mode "timezones"
     (let ((tzs (maccalfw-timezones)))

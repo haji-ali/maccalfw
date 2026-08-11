@@ -32,28 +32,43 @@
             let type = arguments.value("type") ?? "event"
             var items: [(componentType: String, properties: [ICalProperty])] = []
             if type == "event" || type == "all" {
-                try authorizeCalendar(eventStore)
-                let defaultId = eventStore.defaultCalendarForNewEvents?.calendarIdentifier
-                for cal in eventStore.calendars(for: .event) {
-                    items.append(
-                        (
-                            "CALENDAR",
-                            calendarProperties(
-                                cal, entityType: "event", isDefault: cal.calendarIdentifier == defaultId)
-                        ))
+                do {
+                    try authorizeCalendar(eventStore)
+                    let defaultId = eventStore.defaultCalendarForNewEvents?.calendarIdentifier
+                    for cal in eventStore.calendars(for: .event) {
+                        items.append(
+                            (
+                                "CALENDAR",
+                                calendarProperties(
+                                    cal, entityType: "event",
+                                    isDefault: cal.calendarIdentifier == defaultId)
+                            ))
+                    }
+                } catch CLIError.notAuthorized(let message) where type == "all" {
+                    // Missing Reminders access shouldn't stop "all" from
+                    // returning the event calendars we do have access to,
+                    // but the caller should still be told about it.
+                    items.append(("WARNING", [ICalProperty("MESSAGE", value: message)]))
                 }
             }
             if type == "reminder" || type == "all" {
-                try authorizeReminders(eventStore)
-                let defaultId = eventStore.defaultCalendarForNewReminders()?.calendarIdentifier
-                for cal in eventStore.calendars(for: .reminder) {
-                    items.append(
-                        (
-                            "CALENDAR",
-                            calendarProperties(
-                                cal, entityType: "reminder",
-                                isDefault: cal.calendarIdentifier == defaultId)
-                        ))
+                do {
+                    try authorizeReminders(eventStore)
+                    let defaultId = eventStore.defaultCalendarForNewReminders()?.calendarIdentifier
+                    for cal in eventStore.calendars(for: .reminder) {
+                        items.append(
+                            (
+                                "CALENDAR",
+                                calendarProperties(
+                                    cal, entityType: "reminder",
+                                    isDefault: cal.calendarIdentifier == defaultId)
+                            ))
+                    }
+                } catch CLIError.notAuthorized(let message) where type == "all" {
+                    // Missing Calendar access shouldn't stop "all" from
+                    // returning the reminder calendars we do have access to,
+                    // but the caller should still be told about it.
+                    items.append(("WARNING", [ICalProperty("MESSAGE", value: message)]))
                 }
             }
             return try ICalListEncoder.encode(items, as: format)

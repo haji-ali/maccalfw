@@ -25,6 +25,13 @@ case "$FAKE_MODE" in
 EOF
     exit 0
     ;;
+  calendars-partial)
+    cat <<'EOF'
+(((ID nil "cal-1") (TITLE nil "Home") (TYPE nil "event") (COLOR nil "#FF0000") (EDITABLE nil "yes") (DEFAULT nil "yes"))
+ ((MESSAGE nil "Reminders access is not authorized")))
+EOF
+    exit 0
+    ;;
   timezones)
     cat <<'EOF'
 (((ID nil "America/New_York") (NAME nil "Eastern Time") (ABBREV nil "EST") (OFFSET nil "-18000") (DEFAULT nil "yes"))

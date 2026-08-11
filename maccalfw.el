@@ -177,11 +177,19 @@ being kept as strings."
 
 (defun maccalfw-get-calendars (&optional type)
   "Return Mac calendars as plists (:id :title :color :editable :default).
-TYPE is `event' (the default), `reminder', or `all'."
-  (mapcar (lambda (triples)
-            (maccalfw--cli-triples-to-plist triples '(:editable :default)))
-          (maccalfw--cli-call
-           "calendars" (list :type (symbol-name (or type 'event))))))
+TYPE is `event' (the default), `reminder', or `all'. When TYPE is
+`all' and only one of Calendar/Reminders access is granted, the
+calendars maccalq could still list are returned and the
+authorization failure is reported with `message' instead of
+aborting the whole call."
+  (delq nil
+        (mapcar
+         (lambda (triples)
+           (if (and (null (cdr triples)) (eq (caar triples) 'MESSAGE))
+               (progn (message "maccalfw: %s" (nth 2 (car triples))) nil)
+             (maccalfw--cli-triples-to-plist triples '(:editable :default))))
+         (maccalfw--cli-call
+          "calendars" (list :type (symbol-name (or type 'event)))))))
 
 (defun maccalfw-timezones ()
   "Return system timezones as an alist of (ID . PLIST).
