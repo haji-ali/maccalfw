@@ -578,10 +578,11 @@ the user, displaying the message PROMPT."
 (defun maccalfw-modify-event (old-data new-data)
   "Update or create an event or reminder.
 Only UID, DTSTART/DUE and RRULE are used from OLD-DATA. NEW-DATA can
-contain only changed fields. If UID is missing or nil, a new
-event is created instead. Reminders (identified by OLD-DATA having no
-DTSTART, see `ical-form-reminder-p') are never created here, only
-updated -- there is no \"new reminder\" command."
+contain only changed fields. If UID is missing or nil, a new event or
+reminder is created instead -- which one is decided by whether
+OLD-DATA is a reminder (identified by having no DTSTART, see
+`ical-form-reminder-p'), e.g. the template `ical-form-create-reminder'
+returns for `maccalfw-new-reminder'."
   (if (ical-form-reminder-p old-data)
       (maccalfw-update-reminder (ical-form-event-get old-data 'UID) new-data)
     ;; if old event has a recurrence, check with use if all future events
@@ -635,6 +636,28 @@ EVENT-DATA contains the initial event information."
                         (lambda (x) (plist-get (cdr x) :default))
                         (maccalfw-timezones)))))))))
   (ical-form-open event-data
+                  (maccalfw-get-calendars 'all)
+                  (maccalfw-timezones)
+                  #'maccalfw-modify-event))
+
+(defun maccalfw-new-reminder (reminder-data)
+  "Create a reminder-details buffer for a new reminder.
+REMINDER-DATA contains the initial reminder information. With a
+prefix arg, and point on an existing reminder, duplicate that
+reminder's SUMMARY/LOCATION/DUE/DESCRIPTION as the starting point
+instead of a blank reminder."
+  (interactive
+   (list
+    (if-let* ((event (and current-prefix-arg
+                         (derived-mode-p 'calfw-calendar-mode)
+                         (get-text-property (point) 'cfw:event)))
+             (old-data (calfw-event-data event))
+             ((ical-form-reminder-p old-data)))
+        (cl-loop for item in old-data
+                       if (member (car item) '(SUMMARY LOCATION DUE DESCRIPTION))
+                       collect item)
+      (ical-form-create-reminder))))
+  (ical-form-open reminder-data
                   (maccalfw-get-calendars 'all)
                   (maccalfw-timezones)
                   #'maccalfw-modify-event))

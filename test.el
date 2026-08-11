@@ -208,6 +208,17 @@ environment variable, set to MODE here."
       (should (equal '((ARGS nil "update-event --id evt-1 --start 2026-01-01T09:00:00Z --format elisp"))
                      (maccalfw-modify-event old-data '((SUMMARY nil "x"))))))))
 
+;; A blank `ical-form-create-reminder' template (no UID, no DTSTART) is
+;; what `maccalfw-new-reminder' hands `ical-form-open' as OLD-DATA, so
+;; saving it for the first time must dispatch to "update-reminder" with
+;; no --id, i.e. create -- not fall through to the event branch, which
+;; a naive nil/falsy check on OLD-DATA would do.
+(ert-deftest test-maccalfw-modify-event-dispatches-to-new-reminder-for-blank-template ()
+  (test-maccalfw--with-fake-mode "echo-args"
+    (let ((old-data (ical-form-create-reminder)))
+      (should (equal '((ARGS nil "update-reminder --format elisp"))
+                     (maccalfw-modify-event old-data '((SUMMARY nil "x"))))))))
+
 ;; maccalfw-remove-event/-reminder both always return t regardless of the
 ;; CLI response, so the dispatch itself has to be observed by mocking
 ;; those functions rather than by inspecting `maccalfw-delete-event's

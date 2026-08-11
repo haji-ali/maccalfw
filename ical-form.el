@@ -87,6 +87,14 @@ were modified, relative to the old values."
   "Face used for field names."
   :group 'ical-form)
 
+(defface ical-form-type-tag
+  '((t
+     :inherit shadow
+     :weight bold
+     :height 0.8))
+  "Face used for the \"REMINDER\"/\"EVENT\" type tag."
+  :group 'ical-form)
+
 (defvar-keymap ical-form--custom-map
   :doc "Keymap including custom bindings for `ical-form'."
   "C-c C-k" #'ical-form-kill
@@ -571,7 +579,10 @@ timezones to use in the form.
 
 UPDATE-FN, if provided, is used to set
 `ical-form-update-event-function' locally in the new buffer."
-  (let ((buf (generate-new-buffer "*calender event*")))
+  (let ((buf (generate-new-buffer
+              (if (ical-form-reminder-p event)
+                  "*calendar reminder*"
+                "*calendar event*"))))
     (pop-to-buffer buf)
     (ical-form-mode)
     (when update-fn
@@ -650,13 +661,27 @@ value of UNTABBABLE."
 
 (defun ical-form--show-hide-widget (widget visible)
   "Show/hide WIDGET based on value of VISIBLE.
-Also make it untabbable if hidden."
+Also make it untabbable if hidden, and keep point from landing
+inside it. An `invisible' overlay only hides WIDGET from
+*display* -- `cursor-intangible-mode' decides where point may
+rest via the `cursor-intangible' *text property* (checked with
+`get-pos-property', which ignores overlays), so without also
+setting that property, ordinary cursor motion (not just
+`\\[widget-forward]', which already skips it via `:tab-order')
+can still land point inside the hidden widget, letting its RET
+binding fire even though nothing is visibly there to press."
   (ical-form--widget-overlay
    widget
    :hidden visible
    'evaporate t
    'priority 101
    'invisible (not visible))
+
+  (when-let* ((from (widget-get widget :from))
+              (to (widget-get widget :to)))
+    (if visible
+        (remove-text-properties from to '(cursor-intangible nil))
+      (put-text-property from to 'cursor-intangible t)))
 
   ;; Make widget untabbable if hidden, or any of its parents are hidden
   (ical-form--make-widget-untabbale
@@ -1041,9 +1066,11 @@ it."
       (setq-local
        header-line-format
        (substitute-command-keys
-        "\\<ical-form-mode-map>Event details. \
+        (format
+         "\\<ical-form-mode-map>%s details. \
 Save `\\[ical-form-save]', \
-abort `\\[ical-form-kill]'."))
+abort `\\[ical-form-kill]'."
+         (if (ical-form-reminder-p event) "Reminder" "Event"))))
       (set-buffer-modified-p nil))))
 
 (defun ical-form--widget-group-value-create (widget)
@@ -1096,12 +1123,22 @@ characters."
          (calendars ical-form--calendars)
          (timezone (or (alist-get 'TZID (cdr dt-start))
                        (car-safe ical-form--default-timezone)))
-         (all-day-p (alist-get 'ALL-DAY-P (cdr dt-start)))
+         ;; A reminder with no DUE date has no date/time to show, so default
+         ;; it to all-day rather than falling back to the current time.
+         (all-day-p (if (car dt-start)
+                        (alist-get 'ALL-DAY-P (cdr dt-start))
+                      t))
          (end (unless reminder-p (ical-form-event-get event 'DTEND)))
          (NL (ical-form--make-intangible "\n"))
          (SPC (ical-form--make-intangible " "))
          (NL2 (concat NL NL)))
     (widget-insert NL2)
+
+    (widget-insert
+     (ical-form--make-intangible
+      (propertize (if reminder-p "REMINDER" "EVENT")
+                  'face 'ical-form-type-tag)
+      NL))
 
     (widget-create 'editable-field
                    :field-key 'title
@@ -1153,7 +1190,7 @@ characters."
                    :notify #'ical-form--update-end-time
                    :format (concat SPC "%v" SPC)
                    :size 10
-                   (and event
+                   (and (car dt-start)
                         (format-time-string "%F" (car dt-start))))
 
     (widget-create 'editable-field
@@ -1164,9 +1201,9 @@ characters."
                    :notify #'ical-form--update-end-time
                    :prev-time (car dt-start)
                    :size 6
-                   (ical-form--format-time
-                    (car dt-start)
-                    timezone))
+                   (if (car dt-start)
+                       (ical-form--format-time (car dt-start) timezone)
+                     ""))
 
     ;; Reminders have no end -- a due date is a single instant, not a range.
     (unless reminder-p
@@ -1621,6 +1658,22 @@ TIME-ZONE-ID specifies the timezone."
               (ical-form--format-ical-date start all-day time-zone-id))
         (cons 'DTEND
               (ical-form--format-ical-date end all-day time-zone-id))))
+
+(defun ical-form-create-reminder (&optional due all-day time-zone-id)
+  "Return a reminder alist for a new reminder.
+DUE, if given, is the reminder's due date/time; a reminder created
+with no DUE simply has no due date, same as one fetched with none
+set (see `ical-form-reminder-p'). If ALL-DAY is non-nil, DUE is a
+whole-day due date. TIME-ZONE-ID specifies DUE's timezone.
+
+Always includes a NEEDS-ACTION STATUS -- a real reminder always has
+one, and unlike DTSTART this makes the returned alist non-nil even
+with no DUE, which `ical-form-reminder-p' needs to tell a blank
+reminder template apart from a blank event one."
+  (append
+   (list (cons 'STATUS (list nil "NEEDS-ACTION")))
+   (when due
+     (list (cons 'DUE (ical-form--format-ical-date due all-day time-zone-id))))))
 
 (provide 'ical-form)
 ;;; ical-form.el ends here
