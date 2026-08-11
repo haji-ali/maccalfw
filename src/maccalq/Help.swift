@@ -45,6 +45,14 @@ COMMANDS
       List reminders. --include-completed also returns completed
       ones; by default only incomplete reminders are listed.
 
+  update-reminder [--id ID]
+      Create or update a reminder. Reads the new property triples
+      from stdin, encoded in --format. Omit --id to create a new
+      reminder.
+
+  remove-reminder --id ID
+      Delete a reminder.
+
   timezones
       List known IANA timezone identifiers with display name,
       abbreviation and current UTC offset in seconds.

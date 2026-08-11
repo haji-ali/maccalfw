@@ -98,6 +98,40 @@
             return try ICalListEncoder.encode(
                 filtered.map { ("VTODO", $0.toICalProperties()) }, as: format)
 
+        case "update-reminder":
+            try authorizeReminders(eventStore)
+            let id = arguments.value("id")
+            let inputText = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+            let properties = try ICalDecoder.decode(inputText, as: format)
+
+            let reminder: EKReminder
+            if let id {
+                reminder = try getEKReminder(eventStore, id: id)
+            } else {
+                reminder = EKReminder(eventStore: eventStore)
+            }
+            try reminder.applyICalProperties(properties, eventStore: eventStore)
+            do {
+                try eventStore.save(reminder, commit: true)
+            } catch {
+                throw CLIError.general("Failed to save reminder: \(error.localizedDescription)")
+            }
+            return try ICalEncoder.encode(
+                reminder.toICalProperties(), as: format, componentType: "VTODO")
+
+        case "remove-reminder":
+            try authorizeReminders(eventStore)
+            guard let id = arguments.value("id") else {
+                throw CLIError.invalidArgument("remove-reminder requires --id")
+            }
+            let reminder = try getEKReminder(eventStore, id: id)
+            do {
+                try eventStore.remove(reminder, commit: true)
+            } catch {
+                throw CLIError.general("Failed to remove reminder: \(error.localizedDescription)")
+            }
+            return try ICalEncoder.encode([ICalProperty("REMOVED", value: "yes")], as: format)
+
         case "event":
             try authorizeCalendar(eventStore)
             guard let id = arguments.value("id") else {

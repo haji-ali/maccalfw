@@ -247,6 +247,12 @@ from ALIST."
             (alist-get subprop (cdr prop-val))
           (car prop-val))))))
 
+(defun ical-form-reminder-p (event)
+  "Return non-nil if EVENT is a reminder (VTODO) rather than an event.
+A reminder has a DUE date instead of a DTSTART/DTEND range, so its
+absence of DTSTART -- which every event has, even a blank one created
+via `ical-form-create-event' -- is what distinguishes the two."
+  (and event (not (alist-get 'DTSTART event))))
 
 (defun ical-form-kill ()
   "Kill event buffer.
@@ -342,6 +348,7 @@ If DUPLICATE is non-nil, save the event as a new one."
   (let* ((widgets (ical-form--get-widgets))
          (title-wid (ical-form--find-widget 'title widgets))
          (old-data (widget-get title-wid :event-data))
+         (reminder-p (ical-form-reminder-p old-data))
          (tz (ical-form--value 'timezone widgets))
          (all-day (ical-form--value 'all-day widgets))
          (start (ical-form--parse-datetime
@@ -349,11 +356,14 @@ If DUPLICATE is non-nil, save the event as a new one."
                      "00:00"
                    (ical-form--value 'start-time widgets))
                  (ical-form--value 'start-date widgets)))
-         (end (ical-form--parse-datetime
-               (if all-day
-                   "23:59:59"
-                 (ical-form--value 'end-time widgets))
-               (ical-form--value 'end-date widgets)))
+         ;; Reminders have no end-date/end-time widgets -- a due date is a
+         ;; single instant, not a range.
+         (end (unless reminder-p
+                (ical-form--parse-datetime
+                 (if all-day
+                     "23:59:59"
+                   (ical-form--value 'end-time widgets))
+                 (ical-form--value 'end-date widgets))))
          (old-id (unless duplicate
                    (ical-form-event-get old-data 'UID)))
          (new-data
@@ -365,10 +375,16 @@ If DUPLICATE is non-nil, save the event as a new one."
                       (ical-form--value 'recurrence widgets)))
             (LOCATION nil ,(ical-form--value 'location widgets))
             (DESCRIPTION nil ,(ical-form--notes-value widgets))
-            (X-EMACS-AVAILABILITY
-             nil
-             ,(upcase (symbol-name
-                       (ical-form--value 'availability widgets))))))
+            ;; Reminders have no availability, but have a completion status
+            ;; instead, which events don't expose as editable.
+            ,@(if reminder-p
+                  `((STATUS nil ,(if (ical-form--value 'completed widgets)
+                                     "COMPLETED"
+                                   "NEEDS-ACTION")))
+                `((X-EMACS-AVAILABILITY
+                   nil
+                   ,(upcase (symbol-name
+                             (ical-form--value 'availability widgets))))))))
          (new-event (null old-id)))
     (when (ical-form-event-get old-data 'X-EMACS-READ-ONLY)
       (user-error "Event is not editable.?"))
@@ -376,8 +392,10 @@ If DUPLICATE is non-nil, save the event as a new one."
     (setq new-data
           (append
            new-data
-           (list (cons 'DTSTART (ical-form--format-ical-date start all-day tz))
-                 (cons 'DTEND (ical-form--format-ical-date end all-day tz)))))
+           (if reminder-p
+               (list (cons 'DUE (ical-form--format-ical-date start all-day tz)))
+             (list (cons 'DTSTART (ical-form--format-ical-date start all-day tz))
+                   (cons 'DTEND (ical-form--format-ical-date end all-day tz))))))
 
 
     (cl-flet ((non-trivial-p (x)
@@ -460,10 +478,13 @@ is given or the widget at (point) is for end time/date, in which
 case the end time/date is set."
   (interactive (list (widget-at)))
   (let* ((widgets (ical-form--get-widgets))
-         (for-end-date (or current-prefix-arg
-                           (and widget
-                                (member (widget-get widget :field-key)
-                                        '(end-time end-date)))))
+         ;; Reminders have no end-date/end-time widgets to pick, so ignore
+         ;; any request to target them.
+         (for-end-date (and (ical-form--find-widget 'end-date widgets)
+                            (or current-prefix-arg
+                                (and widget
+                                     (member (widget-get widget :field-key)
+                                             '(end-time end-date))))))
          (ktime (if for-end-date 'end-time 'start-time))
          (kdate (if for-end-date 'end-date 'start-date)))
     (if (widget-get (ical-form--find-widget ktime widgets) :inactive)
@@ -1067,13 +1088,16 @@ characters."
   "Create form in current buffer corresponding to EVENT."
   (let* ((cal-id (ical-form-event-get event 'X-EMACS-CALID))
          (read-only-p (ical-form-event-get event 'X-EMACS-READ-ONLY))
-         (dt-start (ical-form-event-get event 'DTSTART t))
+         (reminder-p (ical-form-reminder-p event))
+         ;; A reminder's date is DUE, a single instant, not a DTSTART/DTEND
+         ;; range.
+         (dt-start (ical-form-event-get event (if reminder-p 'DUE 'DTSTART) t))
          (timezones ical-form--timezones)
          (calendars ical-form--calendars)
          (timezone (or (alist-get 'TZID (cdr dt-start))
                        (car-safe ical-form--default-timezone)))
          (all-day-p (alist-get 'ALL-DAY-P (cdr dt-start)))
-         (end (ical-form-event-get event 'DTEND))
+         (end (unless reminder-p (ical-form-event-get event 'DTEND)))
          (NL (ical-form--make-intangible "\n"))
          (SPC (ical-form--make-intangible " "))
          (NL2 (concat NL NL)))
@@ -1087,11 +1111,14 @@ characters."
                    :format (concat "%v" NL)
                    (or (ical-form-event-get event 'SUMMARY) ""))
 
-    (let* ((options (cl-loop
+    (let* ((cal-type (if reminder-p "reminder" "event"))
+           (cal-of-type-p (lambda (x) (equal (plist-get x :type) cal-type)))
+           (options (cl-loop
                      for x in calendars
-                     when (or (plist-get x :editable)
-                              (equal (plist-get x :id)
-                                     cal-id))
+                     when (and (funcall cal-of-type-p x)
+                              (or (plist-get x :editable)
+                                  (equal (plist-get x :id)
+                                         cal-id)))
                      collect
                      `(item :tag ,(plist-get x :title)
                             :value ,(plist-get x :id)
@@ -1108,12 +1135,14 @@ characters."
        :value (or cal-id
                   (plist-get
                    (cl-find-if
-                    (lambda (x) (plist-get x :default))
+                    (lambda (x) (and (funcall cal-of-type-p x)
+                                     (plist-get x :default)))
                     calendars)
                    :id)
                   (plist-get
                    (cl-find-if
-                    (lambda (x) (plist-get x :editable))
+                    (lambda (x) (and (funcall cal-of-type-p x)
+                                     (plist-get x :editable)))
                     calendars)
                    :id))
        options))
@@ -1139,23 +1168,25 @@ characters."
                     (car dt-start)
                     timezone))
 
-    (widget-create 'editable-field
-                   :field-key 'end-date
-                   :keymap ical-form-field-map
-                   :format (ical-form--make-intangible
-                            "  --   " "%v" " ")
-                   :size 10
-                   (format-time-string "%F" end))
+    ;; Reminders have no end -- a due date is a single instant, not a range.
+    (unless reminder-p
+      (widget-create 'editable-field
+                     :field-key 'end-date
+                     :keymap ical-form-field-map
+                     :format (ical-form--make-intangible
+                              "  --   " "%v" " ")
+                     :size 10
+                     (format-time-string "%F" end))
 
-    (widget-create 'editable-field
-                   :field-key 'end-time
-                   :keymap ical-form-field-map
-                   :format (concat
-                            SPC
-                            "%v"
-                            (ical-form--make-intangible "   "))
-                   :size 6
-                   (ical-form--format-time end timezone))
+      (widget-create 'editable-field
+                     :field-key 'end-time
+                     :keymap ical-form-field-map
+                     :format (concat
+                              SPC
+                              "%v"
+                              (ical-form--make-intangible "   "))
+                     :size 6
+                     (ical-form--format-time end timezone)))
 
     (widget-create 'checkbox
                    :field-key 'all-day
@@ -1167,7 +1198,9 @@ characters."
                    :notify #'ical-form--hs-action
                    :hs (ical-form--checkbox-hs
                         nil
-                        '(start-time end-time timezone))
+                        (if reminder-p
+                            '(start-time timezone)
+                          '(start-time end-time timezone)))
                    all-day-p)
     (let* ((options (mapcar
                      (lambda (x)
@@ -1191,21 +1224,30 @@ characters."
        :old-value timezone
        options))
 
-    (widget-create
-     'radio-button-choice
-     :field-key 'availability
-     :entry-format (concat "%b" SPC "%v" SPC)
-     :format (concat "%v" NL2)
-     :value (or
-             (ical-form-event-get event 'X-EMACS-AVAILABILITY) 'busy)
-     `(item :format ,(ical-form--make-intangible "Tentative")
-            :value tentative)
-     `(item :format ,(ical-form--make-intangible "Free")
-            :value free)
-     `(item :format ,(ical-form--make-intangible "Busy")
-            :value busy)
-     `(item :format ,(ical-form--make-intangible "Unavailable")
-            :value unavailable))
+    ;; Reminders have no availability, but have a completion status instead.
+    (if reminder-p
+        (widget-create
+         'checkbox
+         :field-key 'completed
+         :format (concat "%[%v%]"
+                         (ical-form--make-intangible " Completed")
+                         NL2)
+         (eq (ical-form-event-get event 'STATUS) 'completed))
+      (widget-create
+       'radio-button-choice
+       :field-key 'availability
+       :entry-format (concat "%b" SPC "%v" SPC)
+       :format (concat "%v" NL2)
+       :value (or
+               (ical-form-event-get event 'X-EMACS-AVAILABILITY) 'busy)
+       `(item :format ,(ical-form--make-intangible "Tentative")
+              :value tentative)
+       `(item :format ,(ical-form--make-intangible "Free")
+              :value free)
+       `(item :format ,(ical-form--make-intangible "Busy")
+              :value busy)
+       `(item :format ,(ical-form--make-intangible "Unavailable")
+              :value unavailable)))
 
     (widget-create
      'editable-field
@@ -1443,14 +1485,17 @@ characters."
 
     (widget-insert NL2)
 
-    (when-let* ((stat (ical-form-event-get event 'STATUS)))
-      (unless (eq stat 'none)
-        (widget-insert
-         (ical-form--make-intangible
-          (concat (propertize "Status: "
-                              'face 'ical-form-field-names)
-                  (symbol-name stat)
-                  NL2)))))
+    ;; Reminders show their completion status as the editable "Completed"
+    ;; checkbox above instead of this read-only line.
+    (unless reminder-p
+      (when-let* ((stat (ical-form-event-get event 'STATUS)))
+        (unless (eq stat 'none)
+          (widget-insert
+           (ical-form--make-intangible
+            (concat (propertize "Status: "
+                                'face 'ical-form-field-names)
+                    (symbol-name stat)
+                    NL2))))))
 
     (when-let* ((org (ical-form-event-get event 'ORGANIZER)))
       (widget-insert

@@ -259,6 +259,24 @@ FUTURE is non-nil, all future occurrences are removed."
   (maccalfw--invalidate-items-cache)
   t)
 
+(defun maccalfw-update-reminder (id changed-data)
+  "Update or create a reminder, returning the saved reminder's data.
+ID is the reminder identifier, or nil to create a new reminder.
+CHANGED-DATA is an alist of the fields to change, in `ical-form'
+format."
+  (prog1
+      (maccalfw--cli-call
+       "update-reminder"
+       (list :id id)
+       (prin1-to-string changed-data))
+    (maccalfw--invalidate-items-cache)))
+
+(defun maccalfw-remove-reminder (id)
+  "Remove reminder ID, returning t on success."
+  (maccalfw--cli-call "remove-reminder" (list :id id))
+  (maccalfw--invalidate-items-cache)
+  t)
+
 (defun maccalfw--decode-date (time)
   "Return a calendar date from encoded TIME.
 The return value is (month day year)."
@@ -488,14 +506,14 @@ set of calendar IDs of TYPE being displayed together; see
 (defun maccalfw-open (&optional calendars)
   "Open a calfw calendar with CALENDARS from Apple's Calendar/Reminders.
 This command displays any CALENDARS obtained using
-`maccalfw-get-calendars' or all event calendars if it is \\='all.
-CALENDARS may mix event and reminder calendars (e.g. from
+`maccalfw-get-calendars', or every event and reminder calendar if it
+is \\='all. CALENDARS may mix event and reminder calendars (e.g. from
 `(maccalfw-get-calendars \\='all)'); each is dispatched to an events or
 a reminders source by its own :type."
   (interactive (list 'all))
   (maccalfw--cli-ensure)
   (when (eq calendars 'all)
-    (setq calendars (maccalfw-get-calendars)))
+    (setq calendars (maccalfw-get-calendars 'all)))
   (calfw-open-calendar-buffer
    :view (if (featurep 'calfw-blocks)
              'block-week
@@ -520,18 +538,20 @@ a reminders source by its own :type."
              #'string-lessp)))
 
 (defun maccalfw-delete-event (ev)
-  "Delete event EV."
+  "Delete event or reminder EV."
   (interactive
    (list (or (when-let* ((cfw-ev (get-text-property (point) 'cfw:event)))
                (calfw-event-data cfw-ev))
              (error "No event at location"))))
   (or (prog1
-            (maccalfw-remove-event
-             (ical-form-event-get ev 'UID)
-             (ical-form-event-get ev 'DTSTART)
-             (if (ical-form-event-get ev 'RRULE)
-               (maccalfw-modify-future-events-p)
-             nil))
+            (if (ical-form-reminder-p ev)
+                (maccalfw-remove-reminder (ical-form-event-get ev 'UID))
+              (maccalfw-remove-event
+               (ical-form-event-get ev 'UID)
+               (ical-form-event-get ev 'DTSTART)
+               (if (ical-form-event-get ev 'RRULE)
+                 (maccalfw-modify-future-events-p)
+               nil)))
         (message "Event deleted")
         (calfw-refresh-calendar-buffer nil))
       (error "Deleting event failed")))
@@ -556,24 +576,28 @@ the user, displaying the message PROMPT."
     maccalfw-modify-future-events-p))
 
 (defun maccalfw-modify-event (old-data new-data)
-  "Update or create an event.
-Only UID, DTSTART and RRULE are used from OLD-DATA. NEW-DATA can
+  "Update or create an event or reminder.
+Only UID, DTSTART/DUE and RRULE are used from OLD-DATA. NEW-DATA can
 contain only changed fields. If UID is missing or nil, a new
-event is created instead."
-  ;; if old event has a recurrence, check with use if all future events
-  ;; should be editied or just the current one
-  (let ((future
-         (and (or (ical-form-event-get old-data 'RRULE)
-                  (ical-form-event-get new-data 'RRULE))
-              ;; If changing recurrence rule, then we should modify all
-              ;; future events. Otherwise, we should ask the user
-              (or (ical-form-event-get new-data 'RRULE)
-                  (maccalfw-modify-future-events-p)))))
-    (maccalfw-update-event
-     (ical-form-event-get old-data 'UID)
-     new-data
-     (ical-form-event-get old-data 'DTSTART)
-     future)))
+event is created instead. Reminders (identified by OLD-DATA having no
+DTSTART, see `ical-form-reminder-p') are never created here, only
+updated -- there is no \"new reminder\" command."
+  (if (ical-form-reminder-p old-data)
+      (maccalfw-update-reminder (ical-form-event-get old-data 'UID) new-data)
+    ;; if old event has a recurrence, check with use if all future events
+    ;; should be editied or just the current one
+    (let ((future
+           (and (or (ical-form-event-get old-data 'RRULE)
+                    (ical-form-event-get new-data 'RRULE))
+                ;; If changing recurrence rule, then we should modify all
+                ;; future events. Otherwise, we should ask the user
+                (or (ical-form-event-get new-data 'RRULE)
+                    (maccalfw-modify-future-events-p)))))
+      (maccalfw-update-event
+       (ical-form-event-get old-data 'UID)
+       new-data
+       (ical-form-event-get old-data 'DTSTART)
+       future))))
 
 (defun maccalfw-new-event (event-data)
   "Create an events-details buffer for a new event.
@@ -611,7 +635,7 @@ EVENT-DATA contains the initial event information."
                         (lambda (x) (plist-get (cdr x) :default))
                         (maccalfw-timezones)))))))))
   (ical-form-open event-data
-                  (maccalfw-get-calendars)
+                  (maccalfw-get-calendars 'all)
                   (maccalfw-timezones)
                   #'maccalfw-modify-event))
 
@@ -621,7 +645,7 @@ EVENT-DATA contains the initial event information."
    (list (or (get-text-property (point) 'cfw:event)
              (error "No event at location"))))
   (ical-form-open (calfw-event-data event)
-                  (maccalfw-get-calendars)
+                  (maccalfw-get-calendars 'all)
                   (maccalfw-timezones)
                   #'maccalfw-modify-event))
 

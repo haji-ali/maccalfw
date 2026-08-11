@@ -7,8 +7,7 @@
         /// Reminders (VTODO) as a flat property list, analogous to
         /// EKEvent.toICalProperties() but with VTODO-shaped fields: DUE
         /// instead of DTSTART/DTEND, COMPLETED/STATUS/PRIORITY instead of
-        /// DTSTAMP/STATUS/availability. Read-only: there is no
-        /// applyICalProperties for reminders.
+        /// DTSTAMP/STATUS/availability.
         func toICalProperties() -> [ICalProperty] {
             var props: [ICalProperty] = []
             func add(_ name: String, _ value: String?) {
@@ -65,6 +64,72 @@
             }
             return calendar.date(from: components)
         }
+
+        /// The inverse of `date(from:)` above: builds the DateComponents
+        /// `dueDateComponents` expects from a DUE property, matching how
+        /// `toICalProperties()` reads one back -- no `.hour` component
+        /// means an all-day due date.
+        static func dateComponents(fromDue property: ICalProperty) throws -> DateComponents {
+            let (date, isAllDay, timeZoneId) = try ICalDateFormatting.date(from: property)
+            var calendar = Calendar(identifier: .gregorian)
+            let timeZone = timeZoneId.flatMap { TimeZone(identifier: $0) }
+            if let timeZone { calendar.timeZone = timeZone }
+            var components = calendar.dateComponents(
+                isAllDay
+                    ? [.year, .month, .day]
+                    : [.year, .month, .day, .hour, .minute, .second],
+                from: date)
+            components.timeZone = isAllDay ? nil : timeZone
+            return components
+        }
+
+        /// Applies whichever properties are present in PROPERTIES; unlisted
+        /// fields are left unchanged.
+        func applyICalProperties(_ properties: [ICalProperty], eventStore: EKEventStore) throws {
+            var rruleStrings: [String] = []
+            for prop in properties {
+                switch prop.name {
+                case "SUMMARY":
+                    title = prop.value
+                case "LOCATION":
+                    location = prop.value.isEmpty ? nil : prop.value
+                case "DESCRIPTION":
+                    notes = prop.value
+                case "DUE":
+                    dueDateComponents = try Self.dateComponents(fromDue: prop)
+                case "STATUS":
+                    isCompleted = prop.value.uppercased() == "COMPLETED"
+                case "URL":
+                    url = prop.value.isEmpty ? nil : URL(string: prop.value)
+                case "PRIORITY":
+                    priority = Int(prop.value) ?? 0
+                case "X-EMACS-CALID":
+                    guard let cal = eventStore.calendar(withIdentifier: prop.value) else {
+                        throw CLIError.general("Cannot retrieve calendar: \(prop.value)")
+                    }
+                    calendar = cal
+                case "RRULE":
+                    rruleStrings.append(prop.value)
+                default:
+                    // Ignore unhandled keys, as before.
+                    break
+                }
+            }
+            if !rruleStrings.isEmpty {
+                recurrenceRules = nil
+                for ruleString in rruleStrings {
+                    addRecurrenceRule(try EKRecurrenceRule(icalRule: RecurrenceRule.parse(ruleString)))
+                }
+            }
+        }
+    }
+
+    /// Fetches a reminder by identifier.
+    func getEKReminder(_ eventStore: EKEventStore, id: String) throws -> EKReminder {
+        guard let item = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
+            throw CLIError.general("Failed to fetch reminder.")
+        }
+        return item
     }
 
     /// EKEventStore.fetchReminders(matching:completion:) is

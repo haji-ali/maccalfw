@@ -167,6 +167,72 @@ environment variable, set to MODE here."
   (test-maccalfw--with-fake-mode "remove-ok"
     (should (eq t (maccalfw-remove-event "evt-1")))))
 
+;;; update-reminder / remove-reminder
+
+(ert-deftest test-maccalfw-update-reminder-stdin-round-trip ()
+  (test-maccalfw--with-fake-mode "echo-stdin"
+    (let* ((changed-data '((SUMMARY nil "New title")
+                           (DUE nil "20260101")))
+           (response (maccalfw-update-reminder nil changed-data))
+           (stdin (nth 2 (assoc 'STDIN response))))
+      (should (equal changed-data (car (read-from-string stdin)))))))
+
+(ert-deftest test-maccalfw-remove-reminder-returns-t ()
+  (test-maccalfw--with-fake-mode "remove-ok"
+    (should (eq t (maccalfw-remove-reminder "rem-1")))))
+
+(ert-deftest test-maccalfw-update-reminder-invalidates-cache ()
+  (test-maccalfw--with-fake-mode "remove-ok"
+    (setq maccalfw--items-cache (list "sentinel" (float-time) (make-hash-table)))
+    (maccalfw-update-reminder nil '((SUMMARY nil "x")))
+    (should (null maccalfw--items-cache))))
+
+(ert-deftest test-maccalfw-remove-reminder-invalidates-cache ()
+  (test-maccalfw--with-fake-mode "remove-ok"
+    (setq maccalfw--items-cache (list "sentinel" (float-time) (make-hash-table)))
+    (maccalfw-remove-reminder "rem-1")
+    (should (null maccalfw--items-cache))))
+
+;;; maccalfw-modify-event / maccalfw-delete-event dispatch to reminder
+;;; vs. event CLI commands, based on `ical-form-reminder-p' of the data.
+
+(ert-deftest test-maccalfw-modify-event-dispatches-to-reminder-for-reminder-data ()
+  (test-maccalfw--with-fake-mode "echo-args"
+    (let ((old-data '((UID nil "rem-1") (DUE nil "20260101"))))
+      (should (equal '((ARGS nil "update-reminder --id rem-1 --format elisp"))
+                     (maccalfw-modify-event old-data '((SUMMARY nil "x"))))))))
+
+(ert-deftest test-maccalfw-modify-event-dispatches-to-event-for-event-data ()
+  (test-maccalfw--with-fake-mode "echo-args"
+    (let ((old-data '((UID nil "evt-1") (DTSTART nil "20260101T090000Z"))))
+      (should (equal '((ARGS nil "update-event --id evt-1 --start 2026-01-01T09:00:00Z --format elisp"))
+                     (maccalfw-modify-event old-data '((SUMMARY nil "x"))))))))
+
+;; maccalfw-remove-event/-reminder both always return t regardless of the
+;; CLI response, so the dispatch itself has to be observed by mocking
+;; those functions rather than by inspecting `maccalfw-delete-event's
+;; return value.
+
+(ert-deftest test-maccalfw-delete-event-dispatches-to-reminder-removal ()
+  (let (dispatched-to)
+    (cl-letf (((symbol-function 'maccalfw-remove-reminder)
+               (lambda (id) (setq dispatched-to (list 'reminder id)) t))
+              ((symbol-function 'maccalfw-remove-event)
+               (lambda (&rest _) (setq dispatched-to '(event)) t))
+              ((symbol-function 'calfw-refresh-calendar-buffer) #'ignore))
+      (maccalfw-delete-event '((UID nil "rem-1") (DUE nil "20260101")))
+      (should (equal '(reminder "rem-1") dispatched-to)))))
+
+(ert-deftest test-maccalfw-delete-event-dispatches-to-event-removal ()
+  (let (dispatched-to)
+    (cl-letf (((symbol-function 'maccalfw-remove-reminder)
+               (lambda (id) (setq dispatched-to (list 'reminder id)) t))
+              ((symbol-function 'maccalfw-remove-event)
+               (lambda (id &rest _) (setq dispatched-to (list 'event id)) t))
+              ((symbol-function 'calfw-refresh-calendar-buffer) #'ignore))
+      (maccalfw-delete-event '((UID nil "evt-1") (DTSTART nil "20260101T090000Z")))
+      (should (equal '(event "evt-1") dispatched-to)))))
+
 ;;; Combined-fetch caching (maccalfw--fetch-items-cached)
 ;;
 ;; calfw queries every configured calendar as a separate source, so
