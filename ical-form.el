@@ -678,7 +678,12 @@ binding fire even though nothing is visibly there to press."
    'invisible (not visible))
 
   (when-let* ((from (widget-get widget :from))
-              (to (widget-get widget :to)))
+              (to (widget-get widget :to))
+              ;; Setting/clearing a text property runs the field's
+              ;; `modification-hooks' (`widget-before-change') just like
+              ;; editing text does; without this, it errors as soon as FROM/TO
+              ;; fall inside or across a field boundary.
+              (inhibit-read-only t))
     (if visible
         (remove-text-properties from to '(cursor-intangible nil))
       (put-text-property from to 'cursor-intangible t)))
@@ -1614,7 +1619,9 @@ characters."
     (cursor-intangible-mode)
 
     (goto-char (point-min))
-    (widget-move 1) ;; Go to next widget (should be title)
+    ;; Go to next widget (should be title); suppress-echo so this initial
+    ;; placement doesn't dump the field's help-echo into the echo area.
+    (widget-move 1 t)
     (widget-end-of-line) ;; Go to end of line
 
     ;; (add-hook 'post-command-hook #'ical-form--avoid-point-max nil t)
