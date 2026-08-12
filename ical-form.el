@@ -618,9 +618,14 @@ If DELETE is non-nil, delete the widget instead."
           (save-restriction
             (widen)
             (goto-char from)
-            ;; Hide any space characters until the beginning of the line, if
-            ;; no other text appears
-            (while (looking-back " " nil)
+            ;; Hide any separator space characters until the beginning of the
+            ;; line, if no other text appears. Separators (inserted via
+            ;; `ical-form--make-intangible') carry `cursor-intangible' from
+            ;; creation, unlike a preceding field's own blank padding -- so
+            ;; checking it keeps this from also swallowing an empty sibling
+            ;; field (e.g. an unset start-date) into WIDGET's hidden overlay.
+            (while (and (looking-back " " nil)
+                        (get-text-property (1- (point)) 'cursor-intangible))
               (backward-char))
             (when (looking-back "\n" nil)
               (setq from (point)))))
