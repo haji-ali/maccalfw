@@ -363,7 +363,8 @@ If DUPLICATE is non-nil, save the event as a new one."
                  (if all-day
                      "00:00"
                    (ical-form--value 'start-time widgets))
-                 (ical-form--value 'start-date widgets)))
+                 (ical-form--value 'start-date widgets)
+                 (unless all-day tz)))
          ;; Reminders have no end-date/end-time widgets -- a due date is a
          ;; single instant, not a range.
          (end (unless reminder-p
@@ -371,7 +372,8 @@ If DUPLICATE is non-nil, save the event as a new one."
                  (if all-day
                      "23:59:59"
                    (ical-form--value 'end-time widgets))
-                 (ical-form--value 'end-date widgets))))
+                 (ical-form--value 'end-date widgets)
+                 (unless all-day tz))))
          (old-id (unless duplicate
                    (ical-form-event-get old-data 'UID)))
          (new-data
