@@ -160,6 +160,48 @@ stderr message text."
               (list (string-trim
                      (string-remove-prefix "maccalq: " (cdr result))))))))
 
+(defvar maccalfw-cli-async-timeout 30
+  "Seconds after which `maccalfw--cli-call-async' gives up on maccalq.")
+
+(defun maccalfw--cli-call-async (command options callback)
+  "Run maccalq COMMAND with OPTIONS without waiting for it to finish.
+OPTIONS is as for `maccalfw--cli-call'.  CALLBACK is called once, with
+the parsed result and nil, or with nil and an error message -- also
+when maccalq is still running after `maccalfw-cli-async-timeout'
+seconds, in which case it is killed."
+  (let* ((exe (maccalfw--cli-ensure))
+         (args (maccalfw--cli-build-args
+                command (append options (list :format 'elisp))))
+         (buf (generate-new-buffer " *maccalq*"))
+         (done nil)
+         (finish (lambda (result err)
+                   (unless done
+                     (setq done t)
+                     (when (buffer-live-p buf) (kill-buffer buf))
+                     (funcall callback result err))))
+         (proc (make-process
+                :name "maccalq" :buffer buf :command (cons exe args)
+                :connection-type 'pipe :noquery t
+                :sentinel
+                (lambda (p _event)
+                  (unless (or done (process-live-p p))
+                    (let ((output (with-current-buffer buf (buffer-string))))
+                      (if (eql (process-exit-status p) 0)
+                          (condition-case err
+                              (funcall finish
+                                       (maccalfw--cli-read-response output) nil)
+                            (error (funcall finish nil (error-message-string err))))
+                        (funcall finish nil
+                                 (string-trim
+                                  (string-remove-prefix "maccalq: " output))))))))))
+    (run-at-time maccalfw-cli-async-timeout nil
+                 (lambda ()
+                   (unless done
+                     (funcall finish nil "maccalq timed out")
+                     (delete-process proc))))
+    (process-send-eof proc)
+    proc))
+
 (defun maccalfw--iso8601 (time)
   "Format Emacs TIME as a UTC ISO8601 string for maccalq."
   (format-time-string "%Y-%m-%dT%H:%M:%SZ" time t))
@@ -206,17 +248,28 @@ and :default when applicable."
                                          v))))))
    (maccalfw--cli-call "timezones")))
 
+(defun maccalfw--events-options (calendar-id start-time end-time)
+  "Return maccalq `events' options; see `maccalfw-fetch-events'."
+  (list :start (maccalfw--iso8601 start-time)
+        :end (maccalfw--iso8601 end-time)
+        :calendar (cond ((null calendar-id) nil)
+                        ((stringp calendar-id) (list calendar-id))
+                        (t calendar-id))))
+
 (defun maccalfw-fetch-events (calendar-id start-time end-time)
   "Return events between START-TIME and END-TIME.
 CALENDAR-ID may be nil (all calendars), a single calendar ID
 string, or a list of calendar IDs."
   (maccalfw--cli-call
-   "events"
-   (list :start (maccalfw--iso8601 start-time)
-         :end (maccalfw--iso8601 end-time)
-         :calendar (cond ((null calendar-id) nil)
-                        ((stringp calendar-id) (list calendar-id))
-                        (t calendar-id)))))
+   "events" (maccalfw--events-options calendar-id start-time end-time)))
+
+(defun maccalfw-fetch-events-async (calendar-id start-time end-time callback)
+  "Fetch events like `maccalfw-fetch-events', without waiting for them.
+CALLBACK is called with the events and nil, or with nil and an error
+message; see `maccalfw--cli-call-async'."
+  (maccalfw--cli-call-async
+   "events" (maccalfw--events-options calendar-id start-time end-time)
+   callback))
 
 (defun maccalfw-fetch-reminders (calendar-id &optional include-completed)
   "Return reminders (VTODOs) from CALENDAR-ID.
